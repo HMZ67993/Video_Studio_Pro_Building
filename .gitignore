@@ -1,0 +1,20 @@
+# Developer secrets and generated data - NEVER commit or ship
+tools/keys/
+tools/output/
+tools/state.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+.env
+
+# Python / build artifacts
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+build/
+dist/
+installer_output/
+*.spec

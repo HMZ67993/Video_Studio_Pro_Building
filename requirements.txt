@@ -1,0 +1,18 @@
+# Runtime
+PyQt6>=6.5.0
+cryptography>=41.0.0
+# headless build: the regular opencv-python ships its own Qt plugins that can clash with PyQt6
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+# Arabic shaping fallback when Pillow has no raqm (used by the text engine)
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+
+# Build (Nuitka, single-file EXE)
+nuitka>=2.4
+ordered-set>=4.1.0
+zstandard>=0.22.0
+
+# Tests
+pytest>=7.4.0
