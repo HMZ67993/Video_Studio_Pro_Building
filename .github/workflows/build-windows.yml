@@ -5,11 +5,6 @@ name: Build Windows EXE
 
 on:
   workflow_dispatch:
-    inputs:
-      include_ai:
-        description: "Include AI captions (Whisper) and person cutout (ONNX). Much bigger EXE and slower build; AI imports are verified in the built EXE."
-        type: boolean
-        default: false
   push:
     tags:
       - "v*"
@@ -38,11 +33,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          if ("${{ inputs.include_ai }}" -eq "true") {
-            python -m pip install -r requirements-ai.txt
-            python -c "import faster_whisper, ctranslate2, onnxruntime; print('AI imports OK')"
-            if ($LASTEXITCODE -ne 0) { throw "AI dependencies failed to import" }
-          }
 
       - name: Unit tests
         shell: pwsh
@@ -68,10 +58,8 @@ jobs:
       - name: Build single-file EXE (Nuitka)
         shell: pwsh
         run: |
-          $ai = @()
-          if ("${{ inputs.include_ai }}" -eq "true") {
-            $ai = @("--include-package=faster_whisper", "--include-package=ctranslate2", "--include-package=onnxruntime", "--include-package=tokenizers", "--include-package=av", "--include-package=huggingface_hub", "--include-package=tqdm", "--include-package-data=faster_whisper", "--include-package-data=ctranslate2", "--include-package-data=onnxruntime", "--include-package-data=av")
-          }
+          # The EXE stays lean. Native AI wheels are shipped as a separate on-demand runtime ZIP.
+          @{ repository = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content -Encoding utf8 hmz_ai_config.json
           $icon = @()
           if (Test-Path icon.ico) { $icon = @("--windows-icon-from-ico=icon.ico", "--include-data-files=icon.ico=icon.ico") }
           python -m nuitka `
@@ -91,6 +79,7 @@ jobs:
             --include-module=video_studio_record `
             --include-module=video_studio_home `
             --include-module=video_studio_recent `
+            --include-module=video_studio_ai_runtime `
             --include-package=arabic_reshaper `
             --include-package=bidi `
             --nofollow-import-to=tests `
@@ -100,19 +89,27 @@ jobs:
             --msvc=latest `
             --assume-yes-for-downloads `
             --remove-output `
-            @ai `
+            --include-data-files=hmz_ai_config.json=hmz_ai_config.json `
             @icon `
             video_studio.py
           if ($LASTEXITCODE -ne 0) { throw "Nuitka failed" }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build/HMZVideoStudioPro.exe dist/HMZVideoStudioPro.exe
 
+      - name: Build optional AI runtime bundle
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --target build/ai_runtime -r requirements-ai.txt
+          Compress-Archive -Path build/ai_runtime/* -DestinationPath dist/HMZ_AI_Runtime_Windows_Py312.zip -CompressionLevel Optimal
+          if (-not (Test-Path dist/HMZ_AI_Runtime_Windows_Py312.zip)) { throw "AI runtime bundle was not created" }
+          $runtimeHash = (Get-FileHash dist/HMZ_AI_Runtime_Windows_Py312.zip -Algorithm SHA256).Hash.ToLower()
+          "$runtimeHash  HMZ_AI_Runtime_Windows_Py312.zip" | Out-File -Encoding ascii dist/HMZ_AI_Runtime_Windows_Py312.sha256
+
       - name: Self-test the built EXE
         shell: pwsh
         run: |
           $out = Join-Path $PWD "build/selftest.txt"
           $selfTestArgs = @("--selftest", "--selftest-out", $out)
-          if ("${{ inputs.include_ai }}" -eq "true") { $selfTestArgs = @("--selftest", "--require-ai", "--selftest-out", $out) }
           $p = Start-Process -FilePath "dist/HMZVideoStudioPro.exe" -ArgumentList $selfTestArgs -Wait -PassThru
           if (-not (Test-Path $out)) { throw "EXE produced no self-test result (failed to start?)" }
           Get-Content $out
@@ -127,9 +124,11 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: HMZVideoStudioPro-${{ steps.ver.outputs.version }}-${{ inputs.include_ai && 'AI' || 'Standard' }}-windows
+          name: HMZVideoStudioPro-${{ steps.ver.outputs.version }}-windows
           path: |
             dist/HMZVideoStudioPro.exe
+            dist/HMZ_AI_Runtime_Windows_Py312.zip
+            dist/HMZ_AI_Runtime_Windows_Py312.sha256
             dist/SHA256.txt
           if-no-files-found: error
 
@@ -139,4 +138,17 @@ jobs:
         with:
           files: |
             dist/HMZVideoStudioPro.exe
+            dist/HMZ_AI_Runtime_Windows_Py312.zip
+            dist/HMZ_AI_Runtime_Windows_Py312.sha256
             dist/SHA256.txt
+
+      - name: Publish on-demand AI runtime release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ai-runtime
+          name: HMZ Video Studio Pro - AI Runtime
+          prerelease: true
+          make_latest: false
+          files: |
+            dist/HMZ_AI_Runtime_Windows_Py312.zip
+            dist/HMZ_AI_Runtime_Windows_Py312.sha256

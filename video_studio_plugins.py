@@ -500,6 +500,10 @@ class BaseAIPlugin:
         self.models_dir = get_ai_models_dir(models_dir)
 
     # ---- environment -----------------------------------------------------
+    def ensure_runtime(self, progress: Progress = None, cancel: Cancel = None) -> None:
+        """Install and activate the optional native runtime when this plugin needs it."""
+        return None
+
     def dependency_error(self) -> str:
         """'' when usable, otherwise a short code (e.g. 'missing_dependency:onnxruntime')."""
         return ""
@@ -686,21 +690,32 @@ class WhisperAutoCaptionsPlugin(BaseAIPlugin):
         plugin_id="ai_whisper_captions",
         name_ar="الترجمة النصية التلقائية للكلام (Whisper)",
         name_en="Auto Captions (Whisper)",
-        desc_ar="يحوّل الكلام في المقطع المحدد إلى مقاطع نص متزامنة على مسار «ترجمة AI». يدعم العربية والإنجليزية وغيرها، ويكتشف اللغة تلقائياً. النموذج (~145 MB) يُحمَّل مرة واحدة من الإنترنت. الدقة جيدة مع الصوت النظيف وتقل مع اللهجات الشديدة والضوضاء؛ راجع النص دائماً.",
-        desc_en="Turns speech in the selected clip into synced text clips on an 'AI Subtitles' track. Arabic, English and more, language auto-detected. The model (~145 MB) downloads once from the internet. Good on clean audio, weaker with heavy dialects and noise; always proofread.",
+        desc_ar="يحوّل الكلام في المقطع المحدد إلى مقاطع نص متزامنة على مسار «ترجمة AI». يدعم العربية والإنجليزية وغيرها. اختر حجم نموذج Whisper من الصغير والسريع إلى الكبير والأدق؛ يتم تنزيل المحرك والنموذج تلقائياً عند الطلب. راجع النص دائماً.",
+        desc_en="Turns speech in the selected clip into synced text clips on an 'AI Subtitles' track. Choose a Whisper model from small/fast to large/more accurate. The runtime and selected model download on demand; always proofread.",
         category="text",
         model_filename="whisper",
         approx_size_mb=145,
         needs_clip="audio",
     )
     MODEL_SIZE = "base"
+    MODEL_OPTIONS = {"tiny": 75, "base": 145, "small": 490, "medium": 1500, "large-v3": 3000}
+
+    def __init__(self, models_dir: Optional[Path] = None):
+        super().__init__(models_dir)
+        self.model_size = self.MODEL_SIZE
 
     @property
     def model_dir(self) -> Path:
-        return self.models_dir / "whisper"
+        return self.models_dir / f"whisper_{self.model_size}"
+
+    def ensure_runtime(self, progress=None, cancel=None) -> None:
+        from video_studio_ai_runtime import install_runtime
+        install_runtime(progress, cancel)
 
     def dependency_error(self) -> str:
         try:
+            from video_studio_ai_runtime import activate_runtime
+            activate_runtime()
             import faster_whisper  # noqa: F401
             import ctranslate2  # noqa: F401
         except Exception as exc:
@@ -722,7 +737,7 @@ class WhisperAutoCaptionsPlugin(BaseAIPlugin):
 
         self.model_dir.mkdir(parents=True, exist_ok=True)
         try:
-            return WhisperModel(self.MODEL_SIZE, device="cpu", compute_type="int8", download_root=str(self.model_dir))
+            return WhisperModel(self.model_size, device="cpu", compute_type="int8", download_root=str(self.model_dir))
         except Exception as exc:
             raise AIError("model_failed", str(exc))
 
@@ -953,8 +968,14 @@ class AutoCutoutPlugin(BaseAIPlugin):
         needs_clip="video",
     )
 
+    def ensure_runtime(self, progress=None, cancel=None) -> None:
+        from video_studio_ai_runtime import install_runtime
+        install_runtime(progress, cancel)
+
     def dependency_error(self) -> str:
         try:
+            from video_studio_ai_runtime import activate_runtime
+            activate_runtime()
             import onnxruntime  # noqa: F401
         except Exception:
             return "missing_dependency:onnxruntime"

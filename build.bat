@@ -34,17 +34,9 @@ rem ---------------------------------------------------------------- 2. deps
 echo [2/8] Installing dependencies from requirements.txt ...
 python -m pip install --disable-pip-version-check -r requirements.txt
 if errorlevel 1 goto :err
-set "AI_ARGS="
+rem AI runtime is downloaded on demand by the app; keep the main EXE small.
 set "AI_SELFTEST_ARG="
-if /i "%HMZ_AI%"=="1" (
-    echo        HMZ_AI=1: adding the optional AI packages ^(bigger EXE, slower build^) ...
-    python -m pip install --disable-pip-version-check -r requirements-ai.txt
-    if errorlevel 1 goto :err
-    python -c "import faster_whisper, ctranslate2, onnxruntime; print('       AI dependencies OK')"
-    if errorlevel 1 (echo [ERROR] AI dependencies failed to import after installation.& goto :err)
-    set "AI_SELFTEST_ARG=--require-ai"
-    set "AI_ARGS=--include-package=faster_whisper --include-package=ctranslate2 --include-package=onnxruntime --include-package=tokenizers --include-package=av --include-package=huggingface_hub --include-package=tqdm --include-package-data=faster_whisper --include-package-data=ctranslate2 --include-package-data=onnxruntime --include-package-data=av"
-)
+python -c "import json,os; json.dump({'repository':os.environ.get('HMZ_AI_REPOSITORY','')},open('hmz_ai_config.json','w',encoding='utf-8'))"
 
 rem ---------------------------------------------------------------- 3. Nuitka + compiler
 echo [3/8] Checking Nuitka and the C compiler ...
@@ -125,6 +117,7 @@ python -m nuitka ^
   --include-module=video_studio_record ^
   --include-module=video_studio_home ^
   --include-module=video_studio_recent ^
+  --include-module=video_studio_ai_runtime ^
   --include-module=video_studio_stabilization ^
   --include-package=arabic_reshaper ^
   --include-package=bidi ^
@@ -134,7 +127,7 @@ python -m nuitka ^
   --nofollow-import-to=tkinter ^
   --assume-yes-for-downloads ^
   --remove-output ^
-  %AI_ARGS% ^
+  --include-data-files=hmz_ai_config.json=hmz_ai_config.json ^
   %CC_ARG% ^
   %ICON_ARGS% ^
   %ENTRY%

@@ -163,8 +163,12 @@ class AIJobThread(QThread):
         pid = self.plugin.descriptor.plugin_id
         cancel = lambda: self.cancel_flag  # noqa: E731
         try:
+            if self.mode in ("install", "install_run", "run"):
+                ensure_runtime = getattr(self.plugin, "ensure_runtime", None)
+                if callable(ensure_runtime):
+                    ensure_runtime(lambda v: self.progress.emit(int(v * (0.35 if self.mode == "install_run" else 0.5))), cancel)
             if self.mode in ("install", "install_run"):
-                self.plugin.install_model(lambda v: self.progress.emit(int(v * (0.5 if self.mode == "install_run" else 1.0))), cancel)
+                self.plugin.install_model(lambda v: self.progress.emit(int((35 + v * 0.65) if self.mode == "install_run" else v)), cancel)
                 if self.mode == "install":
                     self.finished_result.emit(pid, "install", {"ok": True})
                     return
@@ -1106,13 +1110,20 @@ class BrowserPanel(SideTabs):
         if p is None or self._ai_job is not None:
             return
         lang = self.c.lang
+        if p.descriptor.plugin_id == "ai_whisper_captions":
+            options = ["tiny (~75 MB)", "base (~145 MB)", "small (~490 MB)", "medium (~1.5 GB)", "large-v3 (~3 GB)"]
+            current_size = getattr(p, "model_size", "base")
+            current_index = ["tiny", "base", "small", "medium", "large-v3"].index(current_size) if current_size in ["tiny", "base", "small", "medium", "large-v3"] else 1
+            selected, ok = QInputDialog.getItem(
+                self, "Whisper model", "Choose model size (larger models need more disk space and memory):",
+                options, current_index, False,
+            )
+            if not ok:
+                return
+            p.model_size = ["tiny", "base", "small", "medium", "large-v3"][options.index(selected)]
+            p.descriptor.approx_size_mb = p.MODEL_OPTIONS[p.model_size]
         if mode == "install" and not p.descriptor.model_filename:
             QMessageBox.information(self, "HMZ", tr("ai_no_model_needed", lang))
-            return
-        dependency_error = p.dependency_error()
-        if dependency_error:
-            detail = dependency_error.split(":", 1)[1] if ":" in dependency_error else dependency_error
-            QMessageBox.warning(self, "HMZ", tr("ai_reason_missing_dependency", lang, detail=detail))
             return
         clip = self.c.get_selected_clip()
         if mode == "run":

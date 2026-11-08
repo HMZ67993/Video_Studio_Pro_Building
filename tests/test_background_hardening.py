@@ -34,9 +34,16 @@ class TestBackgroundHardening(unittest.TestCase):
             project.tracks[0].clips.append(clip)
 
             full_quality = project._read_clip_source_frame(clip, 0.0, 80, 60, use_proxy=False)
-            preview = project._read_clip_source_frame(clip, 0.0, 80, 60, use_proxy=True)
-            self.assertGreater(float(full_quality[:, :, 2].mean()), float(full_quality[:, :, 0].mean()))
-            self.assertGreater(float(preview[:, :, 0].mean()), float(preview[:, :, 2].mean()))
+            try:
+                preview = project._read_clip_source_frame(clip, 0.0, 80, 60, use_proxy=True)
+                self.assertGreater(float(full_quality[:, :, 2].mean()), float(full_quality[:, :, 0].mean()))
+                self.assertGreater(float(preview[:, :, 0].mean()), float(preview[:, :, 2].mean()))
+            finally:
+                # The thread-local decoder pool intentionally keeps captures open for
+                # sequential preview reads. Release them before the temp directory exits
+                # (Windows does not permit deleting an open AVI file).
+                from video_studio_core import close_reader_pool
+                close_reader_pool()
 
     def test_proxy_generation_is_cached_and_background_callable(self):
         import shutil

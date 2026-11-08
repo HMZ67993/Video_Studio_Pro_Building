@@ -38,8 +38,12 @@ class TestLocate(unittest.TestCase):
             exe = fake_ffmpeg(d / "ffmpeg")
             self.assertEqual(F.find_ffmpeg(d, ""), str(exe))
             self.assertEqual(F.find_ffmpeg(d, str(exe)), str(exe))
-            self.assertEqual(F.ffmpeg_version(str(exe)), (7, 0, 1))
-            self.assertIsNone(F.ffmpeg_version(str(d / "nope")))
+            # Version parsing is platform-independent; don't execute a POSIX
+            # shebang fixture as a Windows PE executable on GitHub's Windows runner.
+            with mock.patch.object(F, "_run", return_value=(0, "ffmpeg version 7.0.1 Copyright")):
+                self.assertEqual(F.ffmpeg_version(str(exe)), (7, 0, 1))
+            with mock.patch.object(F, "_run", return_value=(-1, "not found")):
+                self.assertIsNone(F.ffmpeg_version(str(d / "nope")))
             bad = d / "bad.exe"
             bad.write_text("not a binary")
             self.assertFalse(F.validate_ffmpeg(str(bad)))
@@ -52,7 +56,10 @@ class TestLocate(unittest.TestCase):
             with zipfile.ZipFile(z, "w") as zf:
                 zf.write(src, "ffmpeg-7.0-essentials_build/bin/" + src.name)
                 zf.writestr("ffmpeg-7.0-essentials_build/readme.txt", "x")
-            ok, path = F.extract_ffmpeg_from_zip(z, d / "out")
+            # Extraction is what this test covers; execution is tested separately
+            # with a mocked subprocess result because this fixture is not a real binary.
+            with mock.patch.object(F, "validate_ffmpeg", return_value=True):
+                ok, path = F.extract_ffmpeg_from_zip(z, d / "out")
             self.assertTrue(ok, path)
             self.assertTrue(Path(path).exists())
 
