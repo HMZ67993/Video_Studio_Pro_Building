@@ -9,7 +9,7 @@ from typing import Dict, Tuple
 
 APP_NAME_AR = "إتش إم زد فيديو ستوديو برو"
 APP_NAME_EN = "HMZ Video Studio Pro"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0"
 
 TRANSLATIONS: Dict[str, Tuple[str, str]] = {
     "app_title": ("HMZ Video Studio Pro — استوديو المونتاج الاحترافي", "HMZ Video Studio Pro — Professional Video Editor"),

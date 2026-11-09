@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressBar,
+    QInputDialog,
     QPushButton,
     QScrollArea,
     QTabWidget,

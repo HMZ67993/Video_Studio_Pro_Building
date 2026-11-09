@@ -60,8 +60,12 @@ jobs:
         run: |
           # The EXE stays lean. Native AI wheels are shipped as a separate on-demand runtime ZIP.
           @{ repository = $env:GITHUB_REPOSITORY } | ConvertTo-Json | Set-Content -Encoding utf8 hmz_ai_config.json
-          $icon = @()
-          if (Test-Path icon.ico) { $icon = @("--windows-icon-from-ico=icon.ico", "--include-data-files=icon.ico=icon.ico") }
+          if (-not (Test-Path "icon.ico" -PathType Leaf)) {
+            throw "Required icon.ico was not found in the repository root. Add icon.ico beside video_studio.py."
+          }
+          # Embed the icon in the EXE (Explorer/taskbar) and ship it as an app resource
+          # so the Qt window can load it at runtime via _resource_path("icon.ico").
+          $icon = @("--windows-icon-from-ico=icon.ico", "--include-data-files=icon.ico=icon.ico")
           python -m nuitka `
             --onefile `
             --enable-plugin=pyqt6 `

@@ -79,10 +79,12 @@ if not defined APP_VER (
 echo        Version %APP_VER% ^(file version %FILE_VER%^)
 set "ICON_ARGS="
 if exist "icon.ico" (
-    echo        icon.ico found.
+    echo        icon.ico found - embedding application and window icon.
     set "ICON_ARGS=--windows-icon-from-ico=icon.ico --include-data-files=icon.ico=icon.ico"
 ) else (
-    echo [WARN] icon.ico not found next to build.bat - building without a custom icon.
+    echo [ERROR] Required icon.ico not found next to build.bat.
+    echo         Add icon.ico to the project root before building.
+    goto :err
 )
 
 rem ---------------------------------------------------------------- 5. tests (fast, no GUI needed)

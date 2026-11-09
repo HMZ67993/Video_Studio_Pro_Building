@@ -4,7 +4,7 @@
 #define MyAppName "HMZ Video Studio Pro"
 ; Keep in sync with APP_VERSION in video_studio_i18n.py (or pass /DMyAppVersion=1.2.3 to ISCC)
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0"
 #endif
 #define MyAppPublisher "HMZ-Bytes"
 #define MyAppURL "https://hmzbytes.gumroad.com"
