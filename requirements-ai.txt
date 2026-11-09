@@ -3,3 +3,4 @@
 # Used by GitHub Actions to create the separate downloadable Windows AI runtime bundle.
 faster-whisper>=1.0.3
 onnxruntime>=1.17.0
+huggingface-hub>=0.13,<1.0

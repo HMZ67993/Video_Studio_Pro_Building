@@ -29,3 +29,20 @@ def test_runtime_activation_adds_root_to_path_and_is_idempotent(tmp_path):
             assert runtime.sys.path.count(root_s) == 1
         finally:
             runtime.sys.path[:] = original
+
+
+
+def test_windows_build_explicitly_bundles_asyncio_for_lazy_ai_imports():
+    root = Path(__file__).parents[1]
+    workflow = (root / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+    source = (root / "video_studio.py").read_text(encoding="utf-8")
+    requirements = (root / "requirements-ai.txt").read_text(encoding="utf-8")
+    assert "--include-package=asyncio" in workflow
+    assert "import asyncio" in source
+    assert "huggingface-hub>=0.13,<1.0" in requirements
+
+
+def test_ai_runtime_workflow_smoke_tests_optional_runtime_imports():
+    root = Path(__file__).parents[1]
+    workflow = (root / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+    assert "import asyncio, faster_whisper, ctranslate2, onnxruntime" in workflow
