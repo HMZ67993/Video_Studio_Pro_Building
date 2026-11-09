@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 import urllib.request
 import wave
@@ -44,12 +45,37 @@ class AIError(Exception):
 
 
 def get_ai_models_dir(custom_dir: Optional[Path] = None) -> Path:
+    """Return the canonical models directory; safe to call with either app root or models root.
+
+    AIPluginRegistry historically passed its already-resolved ``ai_models`` directory
+    into each plugin, which used to append ``ai_models`` a second time.  Accept both
+    forms so registry and direct plugin construction resolve to the same location.
+    """
     if custom_dir is not None:
-        base = Path(custom_dir) / "ai_models"
+        supplied = Path(custom_dir).expanduser()
+        base = supplied if supplied.name.casefold() == "ai_models" else supplied / "ai_models"
     else:
         appdata = os.environ.get("APPDATA") or str(Path.home() / ".config")
         base = Path(appdata) / "HMZVideoStudioPro" / "ai_models"
     base.mkdir(parents=True, exist_ok=True)
+
+    # Migrate data created by the old double-append bug without overwriting anything.
+    legacy = base / "ai_models"
+    if legacy.is_dir():
+        try:
+            for item in legacy.iterdir():
+                destination = base / item.name
+                if destination.exists():
+                    continue
+                try:
+                    shutil.move(str(item), str(destination))
+                except OSError:
+                    # Keep the legacy item intact; a later run can retry the migration.
+                    continue
+            if not any(legacy.iterdir()):
+                legacy.rmdir()
+        except OSError:
+            pass
     return base
 
 
@@ -732,14 +758,24 @@ class WhisperAutoCaptionsPlugin(BaseAIPlugin):
     def _load(self):
         err = self.dependency_error()
         if err:
-            raise AIError("missing_dependency", "faster-whisper")
-        from faster_whisper import WhisperModel
-
-        self.model_dir.mkdir(parents=True, exist_ok=True)
+            # Keep the actual import/DLL loader exception for the UI and crash diagnostics.
+            _prefix, _sep, detail = err.partition(":")
+            raise AIError("missing_dependency", detail or err)
         try:
-            return WhisperModel(self.model_size, device="cpu", compute_type="int8", download_root=str(self.model_dir))
+            from faster_whisper import WhisperModel
         except Exception as exc:
-            raise AIError("model_failed", str(exc))
+            raise AIError("missing_dependency", f"{type(exc).__name__}: {exc}") from exc
+
+        try:
+            self.model_dir.mkdir(parents=True, exist_ok=True)
+            return WhisperModel(
+                self.model_size,
+                device="cpu",
+                compute_type="int8",
+                download_root=str(self.model_dir),
+            )
+        except Exception as exc:
+            raise AIError("model_failed", f"{type(exc).__name__}: {exc}") from exc
 
     def install_model(self, progress=None, cancel=None):
         _tick(progress, 10)

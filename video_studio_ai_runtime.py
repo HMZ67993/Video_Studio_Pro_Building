@@ -22,6 +22,7 @@ APP_NAME = "HMZVideoStudioPro"
 ASSET_NAME = "HMZ_AI_Runtime_Windows_Py312.zip"
 USER_AGENT = "HMZ-VideoStudio-Pro-AI-Runtime"
 _DLL_HANDLES = []
+_DLL_DIRS = set()
 
 
 def _repository() -> str:
@@ -44,18 +45,31 @@ def activate_runtime() -> bool:
     """Add an already downloaded runtime to sys.path and register native DLL dirs."""
     root = runtime_dir()
     marker = root / ".hmz_ai_runtime_ready"
+    # A marker alone is not proof of a usable installation (e.g. an interrupted
+    # manual copy or an old/incomplete archive). Refuse activation and let the
+    # installer repair the runtime if either required package is absent.
     if not marker.is_file():
+        return False
+    required = (root / "faster_whisper" / "__init__.py",
+                root / "ctranslate2" / "__init__.py")
+    if not all(path.is_file() for path in required):
         return False
     root_s = str(root)
     if root_s not in sys.path:
         sys.path.insert(0, root_s)
     if os.name == "nt" and hasattr(os, "add_dll_directory"):
+        # Register each native-library directory once. Keep handles alive for the
+        # lifetime of the process; dropping them can make later imports fail.
         for dll in root.rglob("*.dll"):
-            folder = str(dll.parent)
-            try:
-                _DLL_HANDLES.append(os.add_dll_directory(folder))
-            except OSError:
+            folder = str(dll.parent.resolve())
+            if folder in _DLL_DIRS:
                 continue
+            try:
+                handle = os.add_dll_directory(folder)
+            except (OSError, FileNotFoundError):
+                continue
+            _DLL_HANDLES.append(handle)
+            _DLL_DIRS.add(folder)
     return True
 
 

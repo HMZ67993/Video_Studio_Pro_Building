@@ -346,7 +346,7 @@ TRANSLATIONS: Dict[str, Tuple[str, str]] = {
     "ai_reason_no_scenes": ("لم أجد قطعات حادة في هذا المقطع.", "No hard cuts were found in this clip."),
     "ai_reason_no_speech": ("لم أجد كلاماً في هذا المقطع.", "No speech was found in this clip."),
     "ai_reason_locked": ("المسار مقفل.", "The track is locked."),
-    "ai_reason_missing_dependency": ("تعذّر تحميل أو تشغيل مكوّن الذكاء الاصطناعي «{detail}». تحقق من الإنترنت ومساحة القرص ثم أعد المحاولة.", "Could not download or load AI component '{detail}'. Check your internet connection and disk space, then try again."),
+    "ai_reason_missing_dependency": ("تعذّر تحميل مكتبات الذكاء الاصطناعي أو إحدى ملفات التشغيل المطلوبة: {detail}. أعد تثبيت مكوّن AI، وإذا استمرت المشكلة أرسل سجل crash.log.", "Could not load the AI libraries or one of their required runtime files: {detail}. Reinstall the AI component; if the problem continues, send the crash.log file."),
     "ai_reason_model_missing": ("النموذج غير محمّل. اضغط «تحميل النموذج وتفعيله» أولاً.", "The model is not downloaded. Press 'Download & Enable Model' first."),
     "ai_reason_model_failed": ("تعذّر تحميل/تشغيل النموذج: {detail}", "Could not load/run the model: {detail}"),
     "ai_reason_download_failed": ("فشل تنزيل النموذج: {detail}. تحقق من الإنترنت أو ضع الملف يدوياً في مجلد النماذج.", "Model download failed: {detail}. Check your internet or place the file in the models folder manually."),
