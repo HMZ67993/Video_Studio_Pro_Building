@@ -45,11 +45,32 @@ class AIError(Exception):
 
 def get_ai_models_dir(custom_dir: Optional[Path] = None) -> Path:
     if custom_dir is not None:
-        base = Path(custom_dir) / "ai_models"
+        base = Path(custom_dir)
+        # Accept either the application data root or the canonical models root.
+        if base.name.casefold() != "ai_models":
+            base = base / "ai_models"
     else:
         appdata = os.environ.get("APPDATA") or str(Path.home() / ".config")
         base = Path(appdata) / "HMZVideoStudioPro" / "ai_models"
     base.mkdir(parents=True, exist_ok=True)
+
+    # Migrate the layout created by older builds (ai_models/ai_models).
+    # Existing files in the canonical directory always win.
+    legacy = base / "ai_models"
+    if legacy.is_dir():
+        import shutil
+        for item in legacy.iterdir():
+            destination = base / item.name
+            if destination.exists():
+                continue
+            try:
+                if item.is_dir():
+                    shutil.copytree(item, destination)
+                else:
+                    shutil.copy2(item, destination)
+            except OSError:
+                continue
+        shutil.rmtree(legacy, ignore_errors=True)
     return base
 
 
@@ -732,14 +753,15 @@ class WhisperAutoCaptionsPlugin(BaseAIPlugin):
     def _load(self):
         err = self.dependency_error()
         if err:
-            raise AIError("missing_dependency", "faster-whisper")
+            _code, _sep, detail = err.partition(":")
+            raise AIError("missing_dependency", detail or err)
         from faster_whisper import WhisperModel
 
         self.model_dir.mkdir(parents=True, exist_ok=True)
         try:
             return WhisperModel(self.model_size, device="cpu", compute_type="int8", download_root=str(self.model_dir))
         except Exception as exc:
-            raise AIError("model_failed", str(exc))
+            raise AIError("model_failed", f"{type(exc).__name__}: {exc}")
 
     def install_model(self, progress=None, cancel=None):
         _tick(progress, 10)
@@ -1003,7 +1025,7 @@ class AutoCutoutPlugin(BaseAIPlugin):
         try:
             session = ort.InferenceSession(str(self.model_path), providers=["CPUExecutionProvider"])
         except Exception as exc:
-            raise AIError("model_failed", str(exc))
+            raise AIError("model_failed", f"{type(exc).__name__}: {exc}")
         work = Path(params.get("work_dir") or tempfile.gettempdir())
         start, length = _clip_span(clip)
         meta = write_masks(session, clip.source_path, start, length, work / f"cutout_{clip.id}", clip.clip_type == "image", progress, cancel)

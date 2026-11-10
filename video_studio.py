@@ -15,6 +15,8 @@ Implements the 5-Zone CapCut Pro Desktop Interface + Full HMZ-Bytes-App Standard
 """
 
 import datetime
+import asyncio
+from ctypes import wintypes
 import hashlib
 import json
 import platform
@@ -63,6 +65,15 @@ from video_studio_store import (
     DEFAULT_PRODUCTS_JSON_URL, load_cached_products_catalog, load_products_catalog,
 )
 from video_studio_theme import ACCENT_COLORS, apply_theme_to_app, get_effective_palette
+
+# Activate a previously installed per-user AI runtime before optional plugins
+# attempt lazy imports. Missing/incomplete runtimes are intentionally ignored.
+try:
+    from video_studio_ai_runtime import activate_runtime
+    activate_runtime()
+except Exception:
+    pass
+
 
 MAX_CRASH_LOG_BYTES = 200 * 1024  # ~200 KB
 

@@ -84,6 +84,8 @@ jobs:
             --include-module=video_studio_home `
             --include-module=video_studio_recent `
             --include-module=video_studio_ai_runtime `
+            --include-package=asyncio `
+            --include-module=ctypes.wintypes `
             --include-package=arabic_reshaper `
             --include-package=bidi `
             --nofollow-import-to=tests `
@@ -109,11 +111,25 @@ jobs:
           $runtimeHash = (Get-FileHash dist/HMZ_AI_Runtime_Windows_Py312.zip -Algorithm SHA256).Hash.ToLower()
           "$runtimeHash  HMZ_AI_Runtime_Windows_Py312.zip" | Out-File -Encoding ascii dist/HMZ_AI_Runtime_Windows_Py312.sha256
 
-      - name: Self-test the built EXE
+      - name: Smoke-test optional AI runtime imports
         shell: pwsh
         run: |
+          python -m pip install --disable-pip-version-check --target build/ai_runtime -r requirements-ai.txt
+          $env:PYTHONPATH = (Join-Path $PWD "build/ai_runtime")
+          python -c "import asyncio, faster_whisper, ctranslate2, onnxruntime"
+
+      - name: Self-test the built EXE with the optional AI runtime
+        shell: pwsh
+        run: |
+          $runtimeRoot = Join-Path $PWD "build/selftest-ai-runtime"
+          Expand-Archive -Path "dist/HMZ_AI_Runtime_Windows_Py312.zip" -DestinationPath $runtimeRoot -Force
+          $env:APPDATA = Join-Path $PWD "build/selftest-appdata"
+          $aiTarget = Join-Path $env:APPDATA "HMZVideoStudioPro/ai_runtime"
+          New-Item -ItemType Directory -Force $aiTarget | Out-Null
+          Copy-Item (Join-Path $runtimeRoot "*") $aiTarget -Recurse -Force
+          New-Item -ItemType File -Force (Join-Path $aiTarget ".hmz_ai_runtime_ready") | Out-Null
           $out = Join-Path $PWD "build/selftest.txt"
-          $selfTestArgs = @("--selftest", "--selftest-out", $out)
+          $selfTestArgs = @("--selftest", "--require-ai", "--selftest-out", $out)
           $p = Start-Process -FilePath "dist/HMZVideoStudioPro.exe" -ArgumentList $selfTestArgs -Wait -PassThru
           if (-not (Test-Path $out)) { throw "EXE produced no self-test result (failed to start?)" }
           Get-Content $out

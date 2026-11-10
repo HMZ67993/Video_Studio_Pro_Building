@@ -46,6 +46,11 @@ def activate_runtime() -> bool:
     marker = root / ".hmz_ai_runtime_ready"
     if not marker.is_file():
         return False
+    # A marker alone is not proof of a usable runtime (old/incomplete ZIPs
+    # could leave the marker behind). Validate the mandatory Whisper stack.
+    required_packages = ("faster_whisper", "ctranslate2")
+    if any(not (root / package / "__init__.py").is_file() for package in required_packages):
+        return False
     root_s = str(root)
     if root_s not in sys.path:
         sys.path.insert(0, root_s)
