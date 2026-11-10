@@ -67,12 +67,20 @@ def die(msg: str, code: int = 1) -> None:
 def default_state() -> Dict[str, Any]:
     return {
         "version": "1.0.0",
-        "download_url": "https://github.com/OWNER/REPO/releases/latest",
+        "download_url": "https://hmzbytes.gumroad.com/l/Video_Studio_Pro",
         "sha256": "",
-        "notes": "First release",
+        "notes": "الإصدار الأول / The first release",
         "revoked": [],
         "issued": [],
-        "payment": {"price": "", "bank_name": "", "bank_account": "", "instapay": "", "wallet": "", "whatsapp": ""},
+        # Preserve the seller payment details supplied for HMZ Video Studio Pro.
+        "payment": {
+            "price": "500 جنيه مصري",
+            "bank_name": "CIB",
+            "bank_account": "100040309367",
+            "instapay": "01150362890",
+            "wallet": "01557783633",
+            "whatsapp": "201150362890",
+        },
     }
 
 

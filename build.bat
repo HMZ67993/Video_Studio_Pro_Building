@@ -1,108 +1,203 @@
-@echo off
+﻿@echo off
+setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
-setlocal EnableExtensions
 cd /d "%~dp0"
-title HMZ Video Studio Pro - Build (Nuitka single-file EXE)
+title HMZ Video Studio Pro - Local Windows Build
 
 set "APP_NAME=HMZVideoStudioPro"
 set "ENTRY=video_studio.py"
+set "PYTHON_VERSION=3.12"
+set "VENV=%CD%\.hmz_build_venv"
+set "PY=%VENV%\Scripts\python.exe"
+set "BUILD_DIR=%CD%\build"
+set "DIST_DIR=%CD%\dist"
+set "AI_DIR=%CD%\.hmz_ai_runtime_stage"
+set "TEST_APPDATA=%BUILD_DIR%\selftest-appdata"
+set "UNIT_TEST_APPDATA=%BUILD_DIR%\unit-test-appdata"
+set "SELFTEST_FILE=%BUILD_DIR%\selftest-ai.txt"
 
 echo ============================================================
-echo  HMZ Video Studio Pro - single-file EXE build (Nuitka)
+echo  HMZ Video Studio Pro - LOCAL BUILD
+echo  Python 3.12 x64 / Nuitka / Separate AI runtime
 echo ============================================================
+echo.
 
-rem ---------------------------------------------------------------- 1. Python
-echo [1/8] Checking Python ...
-where python >nul 2>&1
+rem ------------------------------------------------------------
+rem 1) Require the same Python ABI used by the published AI wheels.
+rem    Do not silently build with Python 3.13/3.14 or 32-bit Python.
+echo [1/9] Checking Python 3.12 x64 ...
+where py >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] Python was not found in PATH. Install Python 3.12 from python.org and tick "Add to PATH".
-    goto :err
+    echo [ERROR] Python Launcher "py" was not found.
+    echo Install Python 3.12 x64 from python.org and enable the Python Launcher.
+    goto :failed
 )
-python -c "import sys; sys.exit(0 if sys.version_info[:2] >= (3, 10) else 1)"
+py -3.12 -c "import sys,struct; print('Python:',sys.version); print('Architecture:',struct.calcsize('P')*8,'bit'); raise SystemExit(0 if sys.version_info[:2]==(3,12) and struct.calcsize('P')==8 else 1)"
 if errorlevel 1 (
-    echo [ERROR] Python 3.10 or newer is required. Python 3.12 is recommended.
-    goto :err
+    echo [ERROR] Python 3.12 x64 is required. This build intentionally rejects other versions.
+    goto :failed
 )
-python -c "import struct,sys; sys.exit(0 if struct.calcsize('P')*8 == 64 else 1)"
-if errorlevel 1 (
-    echo [ERROR] 64-bit Python is required.
-    goto :err
-)
-python -c "import sys; print('       Python', sys.version.split()[0])"
 
-rem ---------------------------------------------------------------- 2. deps
-echo [2/8] Installing dependencies from requirements.txt ...
-python -m pip install --disable-pip-version-check -r requirements.txt
-if errorlevel 1 goto :err
-rem AI runtime is downloaded on demand by the app; keep the main EXE small.
-set "AI_SELFTEST_ARG="
-python -c "import json,os; json.dump({'repository':os.environ.get('HMZ_AI_REPOSITORY','')},open('hmz_ai_config.json','w',encoding='utf-8'))"
-
-rem ---------------------------------------------------------------- 3. Nuitka + compiler
-echo [3/8] Checking Nuitka and the C compiler ...
-python -m nuitka --version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Nuitka is not installed correctly. Run: python -m pip install nuitka ordered-set zstandard
-    goto :err
+if not exist "%ENTRY%" (
+    echo [ERROR] Entry point not found: %ENTRY%
+    goto :failed
 )
+if not exist "icon.ico" (
+    echo [ERROR] icon.ico was not found beside build.bat.
+    goto :failed
+)
+
+rem ------------------------------------------------------------
+rem 2) Always use a clean isolated virtual environment. This avoids
+rem    mixing globally installed packages or another Python version.
+echo.
+echo [2/9] Preparing isolated build environment ...
+if exist "%VENV%" rmdir /s /q "%VENV%"
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
+py -3.12 -m venv "%VENV%"
+if errorlevel 1 goto :failed
+if not exist "%PY%" (
+    echo [ERROR] Virtual environment Python was not created.
+    goto :failed
+)
+"%PY%" -m pip install --disable-pip-version-check --upgrade "pip==26.3"
+if errorlevel 1 goto :failed
+
+rem ------------------------------------------------------------
+rem 3) Pin the build stack to the versions used by the successful
+rem    Windows/Python 3.12 build. This prevents surprise major upgrades.
+echo.
+echo [3/9] Installing pinned application/build dependencies ...
+(
+ echo PyQt6==6.12.0
+ echo cryptography==50.0.2
+ echo opencv-python-headless==5.0.0.93
+ echo numpy==2.5.4
+ echo Pillow==13.0.0
+ echo arabic-reshaper==3.1.0
+ echo python-bidi==0.6.12
+ echo nuitka==4.3.5
+ echo ordered-set==4.1.0
+ echo zstandard==0.25.0
+ echo pytest==9.2.0
+) > "%BUILD_DIR%\local-build-constraints.txt"
+if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
+"%PY%" -m pip install --disable-pip-version-check -r requirements.txt -c "%BUILD_DIR%\local-build-constraints.txt"
+if errorlevel 1 (
+    echo [ERROR] Installing the pinned application/build dependencies failed.
+    goto :failed
+)
+"%PY%" -m pip check
+if errorlevel 1 (
+    echo [ERROR] Dependency conflict detected in the isolated build environment.
+    goto :failed
+)
+
+rem ------------------------------------------------------------
+rem 4) Install the separate AI runtime into a target folder.
+rem    It is NOT embedded in the main EXE. Exact direct versions and
+rem    Python 3.12 wheels keep the runtime ABI aligned with the EXE.
+echo.
+echo [4/9] Building the separate Python 3.12 AI runtime ...
+if exist "%AI_DIR%" rmdir /s /q "%AI_DIR%"
+mkdir "%AI_DIR%"
+(
+ echo faster-whisper==1.2.1
+ echo ctranslate2==4.8.5
+ echo onnxruntime==1.31.1
+ echo huggingface-hub==0.36.2
+ echo numpy==2.5.4
+) > "%BUILD_DIR%\local-ai-constraints.txt"
+"%PY%" -m pip install --disable-pip-version-check --target "%AI_DIR%" -r requirements-ai.txt -c "%BUILD_DIR%\local-ai-constraints.txt"
+if errorlevel 1 (
+    echo [ERROR] Creating the separate AI runtime failed.
+    goto :failed
+)
+"%PY%" -c "import sys; sys.path.insert(0, r'%AI_DIR%'); import asyncio, ctypes.wintypes, faster_whisper, ctranslate2, onnxruntime; print('AI imports OK | faster-whisper', faster_whisper.__version__ if hasattr(faster_whisper,'__version__') else 'loaded', '| ctranslate2', ctranslate2.__version__, '| onnxruntime', onnxruntime.__version__)"
+if errorlevel 1 (
+    echo [ERROR] AI runtime import test failed before compiling the EXE.
+    goto :failed
+)
+echo local-build> "%AI_DIR%\.hmz_ai_runtime_ready"
+
+rem ------------------------------------------------------------
+rem 5) Resolve compiler. Prefer MSVC; otherwise use Nuitka's MinGW64
+rem    on Python 3.12. No GitHub Actions dependency.
+echo.
+echo [5/9] Checking C compiler ...
 set "CC_ARG="
 set "VS_PATH="
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if not exist "%VSWHERE%" goto :no_msvc
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
-if not defined VS_PATH goto :no_msvc
-echo        Found Visual Studio C++ build tools.
-set "CC_ARG=--msvc=latest"
-goto :cc_done
-
-:no_msvc
-python -c "import sys; sys.exit(0 if sys.version_info[:2] <= (3, 12) else 1)"
-if errorlevel 1 goto :need_msvc
-echo [WARN] MSVC not found. Nuitka will download MinGW64 automatically ^(internet required, first build only^).
-set "CC_ARG=--mingw64"
-goto :cc_done
-
-:need_msvc
-echo [ERROR] Python 3.13 or newer needs Visual Studio Build Tools ^(Desktop development with C++^). Install them or use Python 3.12.
-goto :err
-
-:cc_done
-
-rem ---------------------------------------------------------------- 4. version + icon
-echo [4/8] Reading version and icon ...
-for /f "delims=" %%v in ('python tools\print_version.py') do set "APP_VER=%%v"
-for /f "delims=" %%v in ('python tools\print_version.py --four') do set "FILE_VER=%%v"
-if not defined APP_VER (
-    echo [ERROR] Could not read APP_VERSION from video_studio_i18n.py
-    goto :err
+if exist "%VSWHERE%" (
+    for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VS_PATH=%%i"
 )
-echo        Version %APP_VER% ^(file version %FILE_VER%^)
-set "ICON_ARGS="
-if exist "icon.ico" (
-    echo        icon.ico found - embedding application and window icon.
-    set "ICON_ARGS=--windows-icon-from-ico=icon.ico --include-data-files=icon.ico=icon.ico"
+if defined VS_PATH (
+    echo MSVC Build Tools found.
+    set "CC_ARG=--msvc=latest"
 ) else (
-    echo [ERROR] Required icon.ico not found next to build.bat.
-    echo         Add icon.ico to the project root before building.
-    goto :err
+    echo MSVC not found. Nuitka will use MinGW64 ^(first build needs internet^).
+    set "CC_ARG=--mingw64"
 )
 
-rem ---------------------------------------------------------------- 5. tests (fast, no GUI needed)
-echo [5/8] Running unit tests ...
+rem ------------------------------------------------------------
+rem 6) Version/configuration.
+echo.
+echo [6/9] Preparing version and application configuration ...
+for /f "delims=" %%v in ('"%PY%" tools\print_version.py') do set "APP_VER=%%v"
+for /f "delims=" %%v in ('"%PY%" tools\print_version.py --four') do set "FILE_VER=%%v"
+if not defined APP_VER (
+    echo [ERROR] Could not read application version.
+    goto :failed
+)
+if not defined FILE_VER (
+    echo [ERROR] Could not read Windows file version.
+    goto :failed
+)
+rem Keep the repository configurable for the app's online AI-runtime installer.
+rem Leave HMZ_AI_REPOSITORY empty for a local/offline build.
+"%PY%" -c "import json,os; json.dump({'repository':os.environ.get('HMZ_AI_REPOSITORY','').strip()},open('hmz_ai_config.json','w',encoding='utf-8'))"
+if errorlevel 1 goto :failed
+echo Version: %APP_VER%  File version: %FILE_VER%
+
+rem ------------------------------------------------------------
+rem 7) Unit tests before compilation.
+rem    Use a clean temporary APPDATA so a previously installed AI runtime
+rem    on this PC cannot leak into tests that verify the missing-runtime case.
+echo.
+echo [7/9] Running unit tests in an isolated user-data folder ...
+if exist "%UNIT_TEST_APPDATA%" rmdir /s /q "%UNIT_TEST_APPDATA%"
+mkdir "%UNIT_TEST_APPDATA%"
+if errorlevel 1 goto :failed
+set "OLD_APPDATA=%APPDATA%"
+set "APPDATA=%UNIT_TEST_APPDATA%"
 set "QT_QPA_PLATFORM=offscreen"
-python -m pytest -q tests
-if errorlevel 1 (
-    echo [ERROR] Tests failed - fix them before building a release.
-    goto :err
-)
+"%PY%" -m pytest -q tests
+set "TEST_EXIT=%ERRORLEVEL%"
+set "APPDATA=%OLD_APPDATA%"
 set "QT_QPA_PLATFORM="
+if not "%TEST_EXIT%"=="0" (
+    echo [ERROR] Unit tests failed. Build stopped.
+    goto :failed
+)
 
-rem ---------------------------------------------------------------- 6. build
-echo [6/8] Compiling ^(this takes several minutes the first time^) ...
-if exist build rmdir /s /q build
-if exist dist rmdir /s /q dist
-mkdir dist
-python -m nuitka ^
+rem ------------------------------------------------------------
+rem 8) Compile the lean EXE. asyncio and ctypes.wintypes are explicit
+rem    because external AI wheels import these stdlib modules lazily.
+echo.
+echo [8/9] Compiling the single-file EXE with Nuitka ...
+if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
+if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
+mkdir "%BUILD_DIR%"
+mkdir "%DIST_DIR%"
+rem The AI target is recreated after cleaning build; preserve it temporarily.
+mkdir "%BUILD_DIR%\ai_runtime"
+"%PY%" -c "import os,shutil; shutil.copytree(r'%AI_DIR%',r'%BUILD_DIR%\ai_runtime',dirs_exist_ok=True)"
+if errorlevel 1 (
+    echo [ERROR] Could not restore the prepared AI runtime after cleaning build.
+    goto :failed
+)
+
+"%PY%" -m nuitka ^
   --onefile ^
   --enable-plugin=pyqt6 ^
   --include-qt-plugins=sensible,multimedia ^
@@ -123,6 +218,8 @@ python -m nuitka ^
   --include-module=video_studio_stabilization ^
   --include-package=arabic_reshaper ^
   --include-package=bidi ^
+  --include-package=asyncio ^
+  --include-module=ctypes.wintypes ^
   --nofollow-import-to=tests ^
   --nofollow-import-to=tools ^
   --nofollow-import-to=pytest ^
@@ -130,74 +227,73 @@ python -m nuitka ^
   --assume-yes-for-downloads ^
   --remove-output ^
   --include-data-files=hmz_ai_config.json=hmz_ai_config.json ^
+  --windows-icon-from-ico=icon.ico ^
+  --include-data-files=icon.ico=icon.ico ^
   %CC_ARG% ^
-  %ICON_ARGS% ^
   %ENTRY%
-if errorlevel 1 goto :err
-if not exist "build\%APP_NAME%.exe" (
-    echo [ERROR] Nuitka finished but build\%APP_NAME%.exe was not created.
-    goto :err
-)
-copy /y "build\%APP_NAME%.exe" "dist\%APP_NAME%.exe" >nul
-if errorlevel 1 goto :err
-
-rem ---------------------------------------------------------------- 7. optional signing, manifest, hash
-echo [7/8] Signing / hashing ...
-if not defined SIGN_PFX goto :no_sign
-if not defined SIGN_PASSWORD goto :sign_pw_missing
-signtool sign /f "%SIGN_PFX%" /p "%SIGN_PASSWORD%" /fd sha256 /tr http://timestamp.digicert.com /td sha256 "dist\%APP_NAME%.exe"
-if errorlevel 1 goto :err
-signtool verify /pa "dist\%APP_NAME%.exe"
-if errorlevel 1 goto :err
-echo        Authenticode signature verified.
-goto :sign_done
-
-:sign_pw_missing
-echo [ERROR] SIGN_PFX is set but SIGN_PASSWORD is not. Set both as environment variables, never inside the project.
-goto :err
-
-:no_sign
-echo [WARN] No code-signing certificate configured ^(SIGN_PFX^). The EXE is UNSIGNED - Windows SmartScreen may warn users.
-
-:sign_done
-if not exist "tools\keys\manifest.key" goto :no_manifest
-python tools\issue_serial.py manifest --dir dist
-if errorlevel 1 goto :err
-goto :manifest_done
-
-:no_manifest
-echo [INFO] tools\keys\manifest.key not found - skipping integrity.json ^(optional for the single-file build^).
-
-:manifest_done
-certutil -hashfile "dist\%APP_NAME%.exe" SHA256 > "dist\SHA256.txt"
-type "dist\SHA256.txt"
-
-rem ---------------------------------------------------------------- 8. real smoke test of the EXE
-echo [8/8] Running the built EXE self-test ...
-if exist "build\selftest.txt" del /q "build\selftest.txt"
-start "" /wait "dist\%APP_NAME%.exe" --selftest %AI_SELFTEST_ARG% --selftest-out "%CD%\build\selftest.txt"
-if not exist "build\selftest.txt" (
-    echo [ERROR] The EXE produced no self-test result. It probably failed to start - check antivirus and crash.log.
-    goto :err
-)
-type "build\selftest.txt"
-findstr /b /c:"RESULT PASS" "build\selftest.txt" >nul
 if errorlevel 1 (
-    echo [ERROR] Self-test reported failures - a module or Qt plugin is missing from the build.
-    goto :err
+    echo [ERROR] Nuitka compilation failed.
+    goto :failed
+)
+if not exist "%BUILD_DIR%\%APP_NAME%.exe" (
+    echo [ERROR] Nuitka did not produce the expected EXE.
+    goto :failed
+)
+copy /y "%BUILD_DIR%\%APP_NAME%.exe" "%DIST_DIR%\%APP_NAME%.exe" >nul
+if errorlevel 1 goto :failed
+
+rem ------------------------------------------------------------
+rem 9) Package runtime and test the actual compiled EXE against it.
+echo.
+echo [9/9] Packaging AI runtime and testing the compiled EXE ...
+"%PY%" -c "import os,zipfile; root=r'%AI_DIR%'; out=r'%DIST_DIR%\HMZ_AI_Runtime_Windows_Py312.zip'; z=zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,compresslevel=6); [(z.write(os.path.join(dp,f),os.path.relpath(os.path.join(dp,f),root))) for dp,ds,fs in os.walk(root) for f in fs]; z.close()"
+if errorlevel 1 goto :failed
+
+if exist "%TEST_APPDATA%" rmdir /s /q "%TEST_APPDATA%"
+mkdir "%TEST_APPDATA%\HMZVideoStudioPro\ai_runtime"
+"%PY%" -c "import shutil; shutil.copytree(r'%AI_DIR%',r'%TEST_APPDATA%\HMZVideoStudioPro\ai_runtime',dirs_exist_ok=True)"
+if errorlevel 1 goto :failed
+
+if exist "%SELFTEST_FILE%" del /q "%SELFTEST_FILE%"
+set "OLD_APPDATA=%APPDATA%"
+set "APPDATA=%TEST_APPDATA%"
+"%DIST_DIR%\%APP_NAME%.exe" --selftest --require-ai --selftest-out "%SELFTEST_FILE%"
+set "EXE_EXIT=%ERRORLEVEL%"
+set "APPDATA=%OLD_APPDATA%"
+if not exist "%SELFTEST_FILE%" (
+    echo [ERROR] Compiled EXE did not produce its AI self-test report. Exit code: %EXE_EXIT%
+    goto :failed
+)
+type "%SELFTEST_FILE%"
+findstr /b /c:"RESULT PASS" "%SELFTEST_FILE%" >nul
+if errorlevel 1 (
+    echo [ERROR] The compiled EXE failed its self-test with the external AI runtime.
+    goto :failed
 )
 
+certutil -hashfile "%DIST_DIR%\%APP_NAME%.exe" SHA256 > "%DIST_DIR%\SHA256.txt"
+if errorlevel 1 goto :failed
+"%PY%" -c "import hashlib,pathlib; p=pathlib.Path(r'%DIST_DIR%\HMZ_AI_Runtime_Windows_Py312.zip'); h=hashlib.sha256(p.read_bytes()).hexdigest(); pathlib.Path(r'%DIST_DIR%\HMZ_AI_Runtime_Windows_Py312.sha256').write_text(h+'  '+p.name+'\n',encoding='ascii')"
+if errorlevel 1 goto :failed
+
+echo.
 echo ============================================================
-echo [SUCCESS] Build completed and self-test passed.
-echo Output: %CD%\dist\%APP_NAME%.exe
+echo [SUCCESS] Local build completed. EXE + AI runtime self-test passed.
+echo EXE: %DIST_DIR%\%APP_NAME%.exe
+echo AI : %DIST_DIR%\HMZ_AI_Runtime_Windows_Py312.zip
+echo Python used: 3.12 x64 in .hmz_build_venv
 echo ============================================================
-echo Next: test on a clean Windows machine, then run installer.iss with Inno Setup if you want a setup file.
+echo NOTE: The AI runtime ZIP is a separate package; it is not embedded in the EXE.
+echo For online in-app AI runtime download, set HMZ_AI_REPOSITORY to owner/repository
+echo when building and publish the runtime ZIP plus its SHA256 sidecar as release assets.
 endlocal
 exit /b 0
 
-:err
+:failed
+echo.
 echo ============================================================
-echo [FAILED] Build failed. Read the messages above.
+echo [FAILED] Local build stopped. Review the FIRST error above.
+echo No successful build is being reported.
 echo ============================================================
 endlocal
 exit /b 1

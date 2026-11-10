@@ -2657,8 +2657,6 @@ def run_selftest(out_path: Optional[str]) -> int:
 
     def t_modules() -> None:
         import importlib
-        # asyncio is imported lazily by huggingface_hub/faster-whisper; keep it in Nuitka builds.
-        import asyncio  # noqa: F401
         for m in ("cv2", "numpy", "PIL", "cryptography.hazmat.primitives.asymmetric.ed25519", "arabic_reshaper", "bidi", "video_studio_core", "video_studio_text",
                   "video_studio_timeline", "video_studio_textpanel", "video_studio_panels", "video_studio_license",
                   "video_studio_update", "video_studio_integrity", "video_studio_store", "video_studio_guide", "video_studio_guide_more", "video_studio_ffmpeg", "video_studio_plugins", "video_studio_stickers", "video_studio_audio", "video_studio_record", "video_studio_recent", "video_studio_home", "video_studio_stabilization"):

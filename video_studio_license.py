@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-GUMROAD_PRODUCT_ID = ""          # <- developer: Gumroad product_id (see README)
+GUMROAD_PRODUCT_ID = "CaXSd_0DfUN7Actk_WBoJg=="  # HMZ Video Studio Pro Gumroad product_id
 GUMROAD_BUY_URL = "https://hmzbytes.gumroad.com/l/video-studio-pro"
 FREE_OPERATIONS = 5               # free exports before activation is required
 MAX_DEVICES = 3                   # SOFT limit on Gumroad activations (uses counter), not a device registry
@@ -45,7 +45,7 @@ REVOKE_PUBLIC_KEY_B64 = ""
 PAYMENT_PUBLIC_KEY_B64 = ""
 UPDATE_PUBLIC_KEY_B64 = ""
 
-DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/hmz-bytes/hmz-video-studio-updates/refs/heads/main/update.json"
+DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/HMZ67993/Video-Studio-Pro/refs/heads/main/Update.json"
 
 _HMAC_PART_A = b"HMZ_VSP_2026_CORE_STATE_"
 _HMAC_PART_B = b"9f8e7d6c5b4a392817263544_GUARD"

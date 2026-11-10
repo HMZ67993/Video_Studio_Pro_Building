@@ -18,8 +18,10 @@ sys.path.insert(0, str(ROOT))
 import video_studio_integrity as integ  # noqa: E402
 from video_studio_license import (  # noqa: E402
     FREE_OPERATIONS,
+    GUMROAD_PRODUCT_ID,
     PRODUCT_CODE,
     LicenseManager,
+    verify_gumroad_key,
     _b64u_encode,
     canonical_json,
     verify_manual_serial,
@@ -47,6 +49,38 @@ def make_serial(priv, **over):
     p.update(over)
     body = canonical_json(p)
     return f"{PRODUCT_CODE}1-{_b64u_encode(body)}.{sign(priv, 'LIC1', body)}", p
+
+
+class TestGumroadConfiguration(unittest.TestCase):
+    def test_product_id_is_configured(self):
+        self.assertEqual(GUMROAD_PRODUCT_ID, "CaXSd_0DfUN7Actk_WBoJg==")
+
+    def test_verify_uses_product_id_and_increment_flag(self):
+        from unittest.mock import patch
+        from urllib.parse import parse_qs
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return json.dumps({"success": True, "uses": 1, "purchase": {"email": "buyer@example.com"}}).encode("utf-8")
+
+        captured = {}
+        def fake_urlopen(req, timeout=0):
+            captured["url"] = req.full_url
+            captured["body"] = parse_qs(req.data.decode("utf-8"))
+            return FakeResponse()
+
+        with patch("video_studio_license.urllib.request.urlopen", side_effect=fake_urlopen):
+            status, _ = verify_gumroad_key("TEST-LICENSE", increment_uses=False)
+
+        self.assertEqual(status, "ok")
+        self.assertEqual(captured["url"], "https://api.gumroad.com/v2/licenses/verify")
+        self.assertEqual(captured["body"]["product_id"], [GUMROAD_PRODUCT_ID])
+        self.assertEqual(captured["body"]["license_key"], ["TEST-LICENSE"])
+        self.assertEqual(captured["body"]["increment_uses_count"], ["false"])
 
 
 class TestSerial(unittest.TestCase):

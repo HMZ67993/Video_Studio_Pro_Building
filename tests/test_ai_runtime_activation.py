@@ -37,7 +37,11 @@ def test_windows_build_explicitly_bundles_asyncio_for_lazy_ai_imports():
     workflow = (root / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
     source = (root / "video_studio.py").read_text(encoding="utf-8")
     requirements = (root / "requirements-ai.txt").read_text(encoding="utf-8")
+    build_bat = (root / "build.bat").read_text(encoding="utf-8")
     assert "--include-package=asyncio" in workflow
+    assert "--include-module=ctypes.wintypes" in workflow
+    assert "--include-module=ctypes.wintypes" in build_bat
+    assert "from ctypes import wintypes" in source
     assert "import asyncio" in source
     assert "huggingface-hub>=0.13,<1.0" in requirements
 
@@ -46,3 +50,7 @@ def test_ai_runtime_workflow_smoke_tests_optional_runtime_imports():
     root = Path(__file__).parents[1]
     workflow = (root / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
     assert "import asyncio, faster_whisper, ctranslate2, onnxruntime" in workflow
+    assert "Self-test the built EXE with the optional AI runtime" in workflow
+    assert '"--selftest", "--require-ai"' in workflow
+    assert '.hmz_ai_runtime_ready' in workflow
+    assert "activate_runtime()" in (root / "video_studio.py").read_text(encoding="utf-8")
