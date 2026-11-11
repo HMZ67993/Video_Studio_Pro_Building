@@ -8,6 +8,7 @@ The app never downloads or runs an installer itself: it shows the version, notes
 the signed https URL in the browser, so the user can verify the file hash before running it.
 """
 
+import base64
 import json
 import os
 import urllib.request
@@ -33,20 +34,73 @@ def is_newer_version(remote_ver: str, current_ver: str) -> bool:
     return a + (0,) * (n - len(a)) > b + (0,) * (n - len(b))
 
 
-def fetch_update_json(url: str, timeout: float = 4.0, allow_http: bool = False) -> Optional[Dict[str, Any]]:
-    """Fetch and parse update.json. Returns None on any failure (the app must keep working offline)."""
+_HMZ_REPO_RAW_PREFIX = "https://raw.githubusercontent.com/HMZ67993/Video-Studio-Pro/"
+_HMZ_GITHUB_API_URL = "https://api.github.com/repos/HMZ67993/Video-Studio-Pro/contents/Update.json?ref=main"
+
+
+def _update_url_candidates(url: str) -> List[str]:
+    """Return the configured endpoint plus trusted mirrors for this project's public Update.json."""
+    candidates = [str(url or "").strip()]
+    lowered = candidates[0].lower()
+    if lowered.startswith(_HMZ_REPO_RAW_PREFIX.lower()):
+        candidates.extend((
+            "https://raw.githubusercontent.com/HMZ67993/Video-Studio-Pro/main/Update.json",
+            "https://cdn.jsdelivr.net/gh/HMZ67993/Video-Studio-Pro@main/Update.json",
+            _HMZ_GITHUB_API_URL,
+        ))
+    # Preserve order while removing empty and duplicate endpoints.
+    return list(dict.fromkeys(item for item in candidates if item))
+
+
+def _parse_update_response(raw: bytes, source_url: str) -> Optional[Dict[str, Any]]:
+    """Parse either raw Update.json or GitHub's base64-encoded Contents API response."""
+    if len(raw) > MAX_UPDATE_BYTES * 2:
+        return None
     try:
-        if not (url.lower().startswith("https://") or (allow_http and url.lower().startswith("http://"))):
-            return None
-        req = urllib.request.Request(url, headers={"User-Agent": "HMZVideoStudioPro/1.0", "Cache-Control": "no-cache"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read(MAX_UPDATE_BYTES + 1)
-        if len(raw) > MAX_UPDATE_BYTES:
-            return None
-        data = json.loads(raw.decode("utf-8"), parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
-        return data if isinstance(data, dict) else None
+        payload = json.loads(raw.decode("utf-8-sig"), parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+        if "api.github.com/repos/" in source_url.lower():
+            if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+                return None
+            encoded = payload.get("content")
+            if not isinstance(encoded, str):
+                return None
+            document_bytes = base64.b64decode(encoded, validate=False)
+            if len(document_bytes) > MAX_UPDATE_BYTES:
+                return None
+            payload = json.loads(
+                document_bytes.decode("utf-8-sig"),
+                parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)),
+            )
+        return payload if isinstance(payload, dict) else None
     except Exception:
         return None
+
+
+def fetch_update_json(url: str, timeout: float = 8.0, allow_http: bool = False) -> Optional[Dict[str, Any]]:
+    """Fetch Update.json with GitHub/CDN fallbacks; unsigned content is still rejected downstream."""
+    for candidate in _update_url_candidates(url):
+        if not (candidate.lower().startswith("https://") or (allow_http and candidate.lower().startswith("http://"))):
+            continue
+        headers = {
+            "User-Agent": "HMZVideoStudioPro/1.1",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+        if "api.github.com/repos/" in candidate.lower():
+            headers["Accept"] = "application/vnd.github+json"
+            headers["X-GitHub-Api-Version"] = "2022-11-28"
+        try:
+            req = urllib.request.Request(candidate, headers=headers)
+            with urllib.request.urlopen(req, timeout=max(1.0, float(timeout))) as resp:
+                raw = resp.read(MAX_UPDATE_BYTES * 2 + 1)
+            data = _parse_update_response(raw, candidate)
+            if data is not None:
+                return data
+        except Exception:
+            # Keep trying the known mirrors. The caller will use a previously
+            # verified cache (if present) and never trust unsigned data.
+            continue
+    return None
 
 
 def load_cached_update(cache_dir: Path) -> Optional[Dict[str, Any]]:

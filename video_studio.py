@@ -786,7 +786,7 @@ if HAS_PYQT6:
 
         def run(self) -> None:
             try:
-                data, _fresh = refresh_update_data(self.update_url, self.cache_dir, self.license_mgr, timeout=4.0)
+                data, _fresh = refresh_update_data(self.update_url, self.cache_dir, self.license_mgr, timeout=8.0)
             except Exception:
                 data = None
             self.update_fetched.emit(data)
