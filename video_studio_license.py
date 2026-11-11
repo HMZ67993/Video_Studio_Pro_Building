@@ -33,17 +33,17 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 GUMROAD_PRODUCT_ID = "CaXSd_0DfUN7Actk_WBoJg=="  # HMZ Video Studio Pro Gumroad product_id
-GUMROAD_BUY_URL = "https://hmzbytes.gumroad.com/l/video-studio-pro"
+GUMROAD_BUY_URL = "https://hmzbytes.gumroad.com/l/Video-Studio-Pro"
 FREE_OPERATIONS = 5               # free exports before activation is required
 MAX_DEVICES = 3                   # SOFT limit on Gumroad activations (uses counter), not a device registry
 REVERIFY_DAYS = 7
 OFFLINE_GRACE_DAYS = 14
 PRODUCT_CODE = "VSP"
 # Public keys (Base64 raw Ed25519). `tools/issue_serial.py keygen` writes them here automatically.
-SERIAL_PUBLIC_KEY_B64 = "pKCd5CutTNaZBC9MgUd4NM71PKXExHQLHBx4f0kImwI="
-REVOKE_PUBLIC_KEY_B64 = "7ThWiLGkVhbqtS96vIu2Q92HB7kTxbKgOGzOb7e/8cE="
-PAYMENT_PUBLIC_KEY_B64 = "mfLV8rxP+431B9TIc/yunVtbbn3VV+eqC5ioQY/I3ok="
-UPDATE_PUBLIC_KEY_B64 = "8jm7k1fXiwsFZXUgs6TKICyckDNrT4ipYv8KGG8y6BA="
+SERIAL_PUBLIC_KEY_B64 = "7Y310Wx4tLH9IoVwMn3exPriZQ+Gr4LAFxjVUrPN7aM="
+REVOKE_PUBLIC_KEY_B64 = "+G4vygjDJ5PiHzhuZ95Q8YgchATY/PslndfE3Z/pHOw="
+PAYMENT_PUBLIC_KEY_B64 = "vPyKRa7ENU/Z9IBrOjYW36YGsYrW4oE+RmaJWuF4MAs="
+UPDATE_PUBLIC_KEY_B64 = "CkTBujmViRIyKtKVLOeICBMBSbL47WeB/+CtTg3rMi4="
 
 DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/HMZ67993/Video-Studio-Pro/refs/heads/main/Update.json"
 

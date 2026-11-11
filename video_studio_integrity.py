@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from video_studio_license import _verify_sig, canonical_json
 
-MANIFEST_PUBLIC_KEY_B64 = ""  # written by `tools/issue_serial.py keygen`
+MANIFEST_PUBLIC_KEY_B64 = "3vCmFxXCra/Q5rij3lVbJHtnW2kfKzVuzt1Jv1DNsGk="  # written by `tools/issue_serial.py keygen`
 MANIFEST_NAME = "integrity.json"
 
 

@@ -67,7 +67,7 @@ def die(msg: str, code: int = 1) -> None:
 def default_state() -> Dict[str, Any]:
     return {
         "version": "1.0.0",
-        "download_url": "https://hmzbytes.gumroad.com/l/Video_Studio_Pro",
+        "download_url": "https://hmzbytes.gumroad.com/l/Video-Studio-Pro",
         "sha256": "",
         "notes": "الإصدار الأول / The first release",
         "revoked": [],
@@ -120,6 +120,58 @@ def patch_constant(path: Path, name: str, value: str) -> None:
     path.write_text(new, encoding="utf-8")
 
 
+def sync_public_keys() -> List[str]:
+    """Safely sync app verification keys from the existing keypairs.
+
+    This does NOT generate, replace, or delete keys. It first proves that every
+    existing private key matches its corresponding .pub file, then patches only
+    the embedded public-key constants. Signing is refused if any pair is absent
+    or inconsistent, so a stale application constant cannot silently create
+    licenses or update documents that the app itself cannot verify.
+    """
+    public_values: Dict[str, str] = {}
+    for purpose in PURPOSES:
+        private_path = KEYS_DIR / f"{purpose}.key"
+        public_path = KEYS_DIR / f"{purpose}.pub"
+        if not private_path.is_file() or not public_path.is_file():
+            die(f"missing {purpose} keypair files; no keys were changed")
+        try:
+            private_raw = base64.b64decode(private_path.read_text(encoding="utf-8").strip(), validate=True)
+            public_raw = base64.b64decode(public_path.read_text(encoding="utf-8").strip(), validate=True)
+            if len(private_raw) != 32 or len(public_raw) != 32:
+                raise ValueError("Ed25519 keys must be 32 bytes")
+            private = Ed25519PrivateKey.from_private_bytes(private_raw)
+            derived_public = private.public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw
+            )
+            if derived_public != public_raw:
+                die(f"{purpose} private/public key mismatch; no keys were changed")
+            public_values[purpose] = base64.b64encode(public_raw).decode("ascii")
+        except SystemExit:
+            raise
+        except Exception as exc:
+            die(f"cannot validate {purpose} keypair ({type(exc).__name__}); no keys were changed")
+
+    pending: List[tuple[Path, str, str]] = []
+    for purpose, value in public_values.items():
+        target, constant_name = PUBLIC_KEY_TARGETS[purpose]
+        try:
+            source = target.read_text(encoding="utf-8")
+        except OSError as exc:
+            die(f"cannot read {target.name} ({type(exc).__name__}); no files were changed")
+        match = re.search(rf'^{constant_name}\s*=\s*"([^"]*)"', source, flags=re.MULTILINE)
+        if not match:
+            die(f"could not find {constant_name} in {target.name}; no files were changed")
+        if match.group(1) != value:
+            pending.append((target, constant_name, value))
+
+    changed: List[str] = []
+    for target, constant_name, value in pending:
+        patch_constant(target, constant_name, value)
+        changed.append(f"{target.name}:{constant_name}")
+    return changed
+
+
 # ---------------------------------------------------------------------------
 def cmd_keygen(force: bool = False) -> None:
     if KEYS_DIR.exists() and any(KEYS_DIR.glob("*.key")):
@@ -153,6 +205,7 @@ def to_ts(date_str: str, end_of_day: bool = False) -> int:
 
 
 def cmd_issue(machine: str, customer: str, cid: str = "", days: int = 0, expires: str = "", nbf: str = "", print_serial: bool = True) -> str:
+    sync_public_keys()
     now = int(time.time())
     payload: Dict[str, Any] = {
         "v": SERIAL_FORMAT_VERSION,
@@ -192,6 +245,7 @@ def jti_from_serial(serial: str) -> str:
 
 
 def cmd_revoke(jti: str = "", serial: str = "") -> Path:
+    sync_public_keys()
     j = jti.strip() or jti_from_serial(serial.strip())
     state = load_state()
     if j and j not in state["revoked"]:
@@ -203,6 +257,7 @@ def cmd_revoke(jti: str = "", serial: str = "") -> Path:
 
 
 def cmd_sign_payment(**kw: str) -> Path:
+    sync_public_keys()
     state = load_state()
     for k in ("price", "bank_name", "bank_account", "instapay", "wallet", "whatsapp"):
         if kw.get(k):
@@ -212,6 +267,7 @@ def cmd_sign_payment(**kw: str) -> Path:
 
 
 def cmd_release(version: str, url: str, sha256: str = "", notes: str = "") -> Path:
+    sync_public_keys()
     if not url.lower().startswith("https://"):
         die("release url must be https://")
     if sha256 and (len(sha256) != 64 or any(c not in "0123456789abcdefABCDEF" for c in sha256)):
@@ -223,6 +279,11 @@ def cmd_release(version: str, url: str, sha256: str = "", notes: str = "") -> Pa
 
 
 def cmd_build() -> Path:
+    # The existing .pub files are authoritative only after each pair is
+    # cryptographically checked against its .key. Never run keygen here.
+    changed = sync_public_keys()
+    for item in changed:
+        print(f"[SYNC] {item} updated from its validated existing .pub file")
     state = load_state()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     release = {"version": state["version"], "url": state["download_url"], "sha256": state.get("sha256", ""), "notes": state.get("notes", "")}
@@ -241,6 +302,7 @@ def cmd_build() -> Path:
 
 
 def cmd_manifest(directory: str, version: str = "") -> Path:
+    sync_public_keys()
     base = Path(directory).resolve()
     if not base.is_dir():
         die(f"not a directory: {base}")
@@ -306,6 +368,7 @@ def main() -> int:
     m.add_argument("--dir", required=True)
     m.add_argument("--version", default="")
     sub.add_parser("build")
+    sub.add_parser("sync-public-keys")
     sub.add_parser("products-template")
     sub.add_parser("list")
     a = ap.parse_args()
@@ -327,6 +390,13 @@ def main() -> int:
         cmd_manifest(a.dir, a.version)
     elif a.cmd == "build":
         cmd_build()
+    elif a.cmd == "sync-public-keys":
+        changed = sync_public_keys()
+        if changed:
+            for item in changed:
+                print(f"[SYNC] {item}")
+        else:
+            print("[OK] all application public keys already match the existing validated keypairs")
     elif a.cmd == "products-template":
         cmd_products_template()
     elif a.cmd == "list":

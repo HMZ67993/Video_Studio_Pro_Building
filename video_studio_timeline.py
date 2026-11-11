@@ -475,6 +475,7 @@ class MultiTrackTimelineWidget(QWidget):
     HEADER_WIDTH = 122
     RULER_HEIGHT = 24
     TRACK_HEIGHT = 46
+    H_SCROLLBAR_HEIGHT = 14
     EDGE = 7
     MIN_ZOOM = 4.0
     MAX_ZOOM = 300.0
@@ -518,6 +519,23 @@ class MultiTrackTimelineWidget(QWidget):
         self.v_scrollbar.valueChanged.connect(self._on_vertical_scrollbar)
         self.v_scrollbar.hide()
 
+        # A dedicated horizontal scrollbar makes the full duration reachable
+        # without requiring Shift+wheel (which differs across input devices).
+        self.h_scrollbar = QScrollBar(Qt.Orientation.Horizontal, self)
+        self.h_scrollbar.setObjectName("TimelineHorizontalScrollBar")
+        self.h_scrollbar.setFixedHeight(self.H_SCROLLBAR_HEIGHT)
+        self.h_scrollbar.setRange(0, 0)
+        self.h_scrollbar.valueChanged.connect(self._on_horizontal_scrollbar)
+        self.h_scrollbar.show()
+        self._clamp_scroll()
+
+    def _viewport_bottom(self) -> int:
+        return max(self.RULER_HEIGHT + 1, self.height() - self.H_SCROLLBAR_HEIGHT)
+
+    def _viewport_right(self) -> int:
+        reserved = self.v_scrollbar.width() if not self.v_scrollbar.isHidden() else 0
+        return max(self.HEADER_WIDTH + 1, self.width() - reserved)
+
     def _on_thumbs_ready(self) -> None:
         self._thumb_version += 1
         self.update()
@@ -534,14 +552,16 @@ class MultiTrackTimelineWidget(QWidget):
             sec_at = self.scroll_x + (anchor_x - self.HEADER_WIDTH) / old
             self.scroll_x = max(0.0, sec_at - (anchor_x - self.HEADER_WIDTH) / new)
         self.pixels_per_sec = new
+        self._clamp_scroll()
         self.update()
 
     def fit_to_view(self) -> None:
         """Zoom so the whole project fits the visible width (CapCut's 'fit timeline')."""
         total = max(1.0, self.controller.project.total_duration())
-        avail = max(60.0, self.width() - self.HEADER_WIDTH - 24.0)
+        avail = max(60.0, self._viewport_right() - self.HEADER_WIDTH - 24.0)
         self.scroll_x = 0.0
         self.set_zoom(avail / total)
+        self._clamp_scroll()
         self.zoom_changed.emit(self.pixels_per_sec)
 
     def _sec_to_x(self, sec: float) -> float:
@@ -554,23 +574,22 @@ class MultiTrackTimelineWidget(QWidget):
         return self.RULER_HEIGHT + idx * self.TRACK_HEIGHT - self.scroll_y
 
     def _track_index_at(self, y: float) -> int:
-        if y < self.RULER_HEIGHT:
+        if y < self.RULER_HEIGHT or y >= self._viewport_bottom():
             return -1
         idx = int((y - self.RULER_HEIGHT + self.scroll_y) // self.TRACK_HEIGHT)
         return idx if 0 <= idx < len(self.controller.project.tracks) else -1
 
     def ensure_visible(self, sec: float) -> None:
-        visible = max(1.0, (self.width() - self.HEADER_WIDTH) / self.pixels_per_sec)
+        visible = max(1.0, (self._viewport_right() - self.HEADER_WIDTH) / self.pixels_per_sec)
         if sec < self.scroll_x or sec > self.scroll_x + visible - 0.5:
             self.scroll_x = max(0.0, sec - visible * 0.25)
+            self._clamp_scroll()
             self.update()
 
     def _clamp_scroll(self) -> None:
         total = self.controller.project.total_duration() + 10
-        visible = (self.width() - self.HEADER_WIDTH) / self.pixels_per_sec
-        self.scroll_x = max(0.0, min(self.scroll_x, max(0.0, total - visible)))
         content_h = len(self.controller.project.tracks) * self.TRACK_HEIGHT
-        view_h = max(1, self.height() - self.RULER_HEIGHT)
+        view_h = max(1, self._viewport_bottom() - self.RULER_HEIGHT)
         max_scroll = max(0.0, content_h - view_h)
         self.scroll_y = max(0.0, min(self.scroll_y, max_scroll))
         bar = getattr(self, "v_scrollbar", None)
@@ -584,6 +603,22 @@ class MultiTrackTimelineWidget(QWidget):
             bar.setVisible(max_scroll > 0)
             bar.setGeometry(max(0, self.width() - bar.width()), self.RULER_HEIGHT,
                             bar.width(), view_h)
+
+        visible_width = max(1, self._viewport_right() - self.HEADER_WIDTH)
+        visible_seconds = visible_width / max(0.01, self.pixels_per_sec)
+        max_scroll_x = max(0.0, total - visible_seconds)
+        self.scroll_x = max(0.0, min(self.scroll_x, max_scroll_x))
+        hbar = getattr(self, "h_scrollbar", None)
+        if hbar is not None:
+            # Scrollbar units are milliseconds; editor geometry remains seconds.
+            hbar.blockSignals(True)
+            hbar.setPageStep(max(1, int(round(visible_seconds * 1000))))
+            hbar.setSingleStep(250)
+            hbar.setRange(0, int(round(max_scroll_x * 1000)))
+            hbar.setValue(int(round(self.scroll_x * 1000)))
+            hbar.blockSignals(False)
+            hbar.setGeometry(self.HEADER_WIDTH, self.height() - self.H_SCROLLBAR_HEIGHT,
+                             visible_width, self.H_SCROLLBAR_HEIGHT)
 
     # ---- track header controls -------------------------------------------------
     @staticmethod
@@ -643,22 +678,26 @@ class MultiTrackTimelineWidget(QWidget):
     def _paint_overlay(self, painter: QPainter) -> None:
         """Playhead + drop hint: the only things that change while playing."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
+        view_right = self._viewport_right()
+        view_bottom = self._viewport_bottom()
+        painter.save()
+        painter.setClipRect(QRectF(0, 0, view_right, view_bottom))
         pal = _palette(self.controller)
         if self._drop_hint is not None:
             idx, sec = self._drop_hint
             hx = self._sec_to_x(sec)
             if idx >= 0:
-                painter.fillRect(QRectF(self.HEADER_WIDTH, self._track_y(idx), w, self.TRACK_HEIGHT - 2), QColor(pal["accent"]).lighter(100).darker(250))
+                painter.fillRect(QRectF(self.HEADER_WIDTH, self._track_y(idx), view_right, self.TRACK_HEIGHT - 2), QColor(pal["accent"]).lighter(100).darker(250))
             painter.setPen(QPen(QColor(pal["accent"]), 1.6, Qt.PenStyle.DashLine))
-            painter.drawLine(int(hx), self.RULER_HEIGHT, int(hx), h)
+            painter.drawLine(int(hx), self.RULER_HEIGHT, int(hx), view_bottom)
         px = self._sec_to_x(self.controller.project.playhead_sec)
-        if px >= self.HEADER_WIDTH:
+        if self.HEADER_WIDTH <= px <= view_right:
             painter.setPen(QPen(QColor("#F43F5E"), 2.0))
-            painter.drawLine(int(px), 0, int(px), h)
+            painter.drawLine(int(px), 0, int(px), view_bottom)
             painter.setBrush(QColor("#F43F5E"))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawPolygon([QPointF(px - 6, 0), QPointF(px + 6, 0), QPointF(px, 11)])
+        painter.restore()
 
     def _paint_static(self, painter: QPainter) -> None:
         proj = self.controller.project
@@ -675,16 +714,19 @@ class MultiTrackTimelineWidget(QWidget):
             small.setPixelSize(max(10, small.pixelSize() - 1))
 
         painter.save()
-        painter.setClipRect(QRectF(self.HEADER_WIDTH, self.RULER_HEIGHT, w - self.HEADER_WIDTH, h - self.RULER_HEIGHT))
+        view_right = self._viewport_right()
+        view_bottom = self._viewport_bottom()
+        painter.setClipRect(QRectF(self.HEADER_WIDTH, self.RULER_HEIGHT,
+                                   view_right - self.HEADER_WIDTH, view_bottom - self.RULER_HEIGHT))
         for idx, trk in enumerate(proj.tracks):
             ty = self._track_y(idx)
-            if ty > h or ty + self.TRACK_HEIGHT < self.RULER_HEIGHT:
+            if ty > view_bottom or ty + self.TRACK_HEIGHT < self.RULER_HEIGHT:
                 continue
-            painter.fillRect(QRectF(self.HEADER_WIDTH, ty, w, self.TRACK_HEIGHT - 2), QColor(pal["track_lane_bg"]))
+            painter.fillRect(QRectF(self.HEADER_WIDTH, ty, view_right, self.TRACK_HEIGHT - 2), QColor(pal["track_lane_bg"]))
             for clip in trk.clips:
                 cx = self._sec_to_x(clip.timeline_start)
                 cw = max(14.0, clip.duration * self.pixels_per_sec)
-                if cx + cw < self.HEADER_WIDTH or cx > w:
+                if cx + cw < self.HEADER_WIDTH or cx > view_right:
                     continue
                 rect = QRectF(cx, ty + 3, cw, self.TRACK_HEIGHT - 8)
                 col = QColor(CLIP_COLORS.get(clip.clip_type, "#155E75"))
@@ -744,7 +786,7 @@ class MultiTrackTimelineWidget(QWidget):
         step = next((s for s in (0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300) if s * self.pixels_per_sec >= 56), 600)
         painter.setPen(QColor(pal["text_muted"]))
         t = int(self.scroll_x // step) * step
-        while self._sec_to_x(t) < w:
+        while self._sec_to_x(t) < view_right:
             x = self._sec_to_x(t)
             if x >= self.HEADER_WIDTH:
                 painter.drawLine(int(x), self.RULER_HEIGHT - 7, int(x), self.RULER_HEIGHT)
@@ -753,16 +795,18 @@ class MultiTrackTimelineWidget(QWidget):
             t += step
         for m in proj.markers:
             mx = self._sec_to_x(m.time_sec)
-            if mx >= self.HEADER_WIDTH:
+            if self.HEADER_WIDTH <= mx <= view_right:
                 painter.setBrush(QColor(m.color_hex))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawPolygon([QPointF(mx - 5, 2), QPointF(mx + 5, 2), QPointF(mx, 11)])
 
         # track headers: type glyph + localized name on the first line, quick toggles on the second
         glyph_font = QFont(small)
+        painter.save()
+        painter.setClipRect(QRectF(0, self.RULER_HEIGHT, self.HEADER_WIDTH, view_bottom - self.RULER_HEIGHT))
         for idx, trk in enumerate(proj.tracks):
             ty = self._track_y(idx)
-            if ty > h or ty + self.TRACK_HEIGHT < self.RULER_HEIGHT:
+            if ty > view_bottom or ty + self.TRACK_HEIGHT < self.RULER_HEIGHT:
                 continue
             painter.fillRect(QRectF(0, ty, self.HEADER_WIDTH - 2, self.TRACK_HEIGHT - 2), QColor(pal["track_header_bg"]))
             if trk.id == self.selected_track_id:
@@ -782,13 +826,14 @@ class MultiTrackTimelineWidget(QWidget):
                 painter.setPen(QColor(pal["text_main"]) if on else QColor(pal["text_muted"]))
                 painter.setFont(glyph_font)
                 painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, glyph_on if on else glyph_off)
+        painter.restore()
         painter.fillRect(0, 0, self.HEADER_WIDTH, self.RULER_HEIGHT, QColor(pal["panel_bg"]))
 
     def _paint_thumbs(self, painter: QPainter, clip: Any, rect: QRectF, path: QPainterPath) -> None:
         th = rect.height() - 6
         painter.save()
         painter.setClipPath(path)
-        w_view = self.width()
+        w_view = self._viewport_right()
         if clip.clip_type == "sticker":
             # one clearly visible icon at the start of the clip (stickers are small drawings, tiling them would be noise)
             img = self._thumbs.get(clip.source_path, 0.0)
@@ -971,21 +1016,32 @@ class MultiTrackTimelineWidget(QWidget):
             self.clip_edit_requested.emit(clip.id)
 
     def wheelEvent(self, event: Any) -> None:
-        dy = event.angleDelta().y() or event.angleDelta().x()
+        dx = event.angleDelta().x()
+        dy = event.angleDelta().y()
+        delta = dy or dx
         mods = event.modifiers()
         if mods & Qt.KeyboardModifier.ControlModifier:
-            self.set_zoom(self.pixels_per_sec * (1.15 if dy > 0 else 1 / 1.15), anchor_x=event.position().x())
+            self.set_zoom(self.pixels_per_sec * (1.15 if delta > 0 else 1 / 1.15), anchor_x=event.position().x())
             self.zoom_changed.emit(self.pixels_per_sec)
         elif mods & Qt.KeyboardModifier.ShiftModifier:
-            self.scroll_x -= (event.angleDelta().x() or dy) / self.pixels_per_sec * 1.2
+            self.scroll_x -= (dx or dy) / self.pixels_per_sec * 1.2
+        elif dx:
+            # Touchpads and horizontal mouse wheels may send an X delta directly.
+            self.scroll_x -= dx / self.pixels_per_sec * 1.2
         else:
             # Plain mouse wheel scrolls through tracks; Shift+wheel scrolls time.
-            self.scroll_y -= (dy or event.angleDelta().x()) / 2.0
+            self.scroll_y -= dy / 2.0
         self._clamp_scroll()
         self.update()
+        event.accept()
 
     def _on_vertical_scrollbar(self, value: int) -> None:
         self.scroll_y = float(value)
+        self._clamp_scroll()
+        self.update()
+
+    def _on_horizontal_scrollbar(self, value: int) -> None:
+        self.scroll_x = float(value) / 1000.0
         self._clamp_scroll()
         self.update()
 
@@ -993,7 +1049,7 @@ class MultiTrackTimelineWidget(QWidget):
         for idx, trk in enumerate(self.controller.project.tracks):
             if trk.id == track_id:
                 top = idx * self.TRACK_HEIGHT
-                view_h = max(1, self.height() - self.RULER_HEIGHT)
+                view_h = max(1, self._viewport_bottom() - self.RULER_HEIGHT)
                 if top < self.scroll_y:
                     self.scroll_y = float(top)
                 elif top + self.TRACK_HEIGHT > self.scroll_y + view_h:

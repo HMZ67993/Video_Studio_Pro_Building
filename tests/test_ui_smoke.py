@@ -74,6 +74,27 @@ class TestUISmoke(unittest.TestCase):
             self.assertLessEqual(log_file.stat().st_size, MAX_CRASH_LOG_BYTES)
             self.assertEqual(handle_remove_integrations(custom_dir=tmp_dir), 0)
 
+    def test_timeline_has_working_horizontal_scrollbar(self) -> None:
+        if not HAS_PYQT6:
+            self.skipTest("PyQt6 is not installed")
+        from PyQt6.QtWidgets import QApplication
+        from video_studio_timeline import MultiTrackTimelineWidget
+
+        app = QApplication.instance() or QApplication([])
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = StudioAppController(custom_data_dir=Path(tmp))
+            widget = MultiTrackTimelineWidget(controller, host=object())
+            widget.resize(640, 210)
+            widget.show()
+            app.processEvents()
+
+            self.assertGreater(widget.h_scrollbar.maximum(), 0)
+            widget.h_scrollbar.setValue(widget.h_scrollbar.maximum())
+            app.processEvents()
+            self.assertGreater(widget.scroll_x, 0.0)
+            self.assertAlmostEqual(widget.h_scrollbar.value() / 1000.0, widget.scroll_x, places=2)
+            widget.close()
+
 
 if __name__ == "__main__":
     unittest.main()

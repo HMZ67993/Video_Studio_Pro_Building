@@ -58,7 +58,12 @@ from video_studio_license import (
 )
 from video_studio_ffmpeg import FFMPEG_DOWNLOAD_PAGE, detect_nvenc, download_ffmpeg, find_ffmpeg, project_has_audio, validate_ffmpeg
 from video_studio_integrity import check_integrity, is_compiled, launcher_path
-from video_studio_update import is_newer_version, refresh_update_data
+from video_studio_update import (
+    has_any_valid_signature,
+    is_newer_version,
+    load_cached_update,
+    refresh_update_data,
+)
 from video_studio_plugins import AIPluginRegistry
 from video_studio_recent import RecentProjects
 from video_studio_store import (
@@ -769,10 +774,12 @@ if HAS_PYQT6:
             self.finished_ok.emit(ok, msg)
 
     class NetworkCheckWorkerThread(QThread):
-        update_fetched = pyqtSignal(dict)
+        # None is emitted too, so dialogs waiting for the first download can
+        # leave their loading state and explain the verification failure.
+        update_fetched = pyqtSignal(object)
 
-        def __init__(self, update_url: str, cache_dir: Path, license_mgr: LicenseManager):
-            super().__init__()
+        def __init__(self, update_url: str, cache_dir: Path, license_mgr: LicenseManager, parent: Optional[QWidget] = None):
+            super().__init__(parent)
             self.update_url = update_url
             self.cache_dir = cache_dir
             self.license_mgr = license_mgr
@@ -782,8 +789,7 @@ if HAS_PYQT6:
                 data, _fresh = refresh_update_data(self.update_url, self.cache_dir, self.license_mgr, timeout=4.0)
             except Exception:
                 data = None
-            if isinstance(data, dict):
-                self.update_fetched.emit(data)
+            self.update_fetched.emit(data)
 
     class IntegrityWorkerThread(QThread):
         done = pyqtSignal(str, list)
@@ -843,47 +849,115 @@ if HAS_PYQT6:
             self.setWindowTitle(tr("pay_dialog_title", lang))
             self.resize(520, 380)
             layout = QVBoxLayout(self)
-            payment = controller.license_mgr.get_verified_payment_info()
-            if not payment:
-                warning_text = tr("pay_unverified_warning", lang)
-                # Fail closed: never display unsigned bank details. Explain the
-                # exact setup problem when the app was built without its public key.
-                if not controller.license_mgr.keys.get("payment", "").strip():
-                    detail = (
-                        "\\n\\nسبب إضافي: مفتاح التحقق العام لبيانات الدفع غير مضمّن في هذه النسخة. "
-                        "أنشئ/استعد مفاتيح المشروع محليًا، ثم أعد بناء التطبيق ووقّع Update.json بالمفتاح نفسه."
-                        if lang == "ar" else
-                        "\\n\\nAdditional cause: this build has no payment verification public key. "
-                        "Restore/generate this project's keys locally, rebuild the app, and sign Update.json "
-                        "with the matching private key."
-                    )
-                    warning_text += detail
-                warn = QLabel(warning_text)
-                warn.setWordWrap(True)
-                layout.addWidget(warn)
-            else:
-                form = QFormLayout()
-                for field_key, label_key in (
-                    ("price", "pay_price"),
-                    ("bank_name", "pay_bank_name"),
-                    ("bank_account", "pay_bank_account"),
-                    ("instapay", "pay_instapay"),
-                    ("wallet", "pay_wallet"),
-                ):
-                    val_lbl = QLineEdit(payment.get(field_key, "-"))
-                    val_lbl.setReadOnly(True)
-                    val_lbl.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-                    form.addRow(tr(label_key, lang), val_lbl)
-                layout.addLayout(form)
-                wa_number = payment.get("whatsapp", "").strip()
-                if wa_number:
-                    btn_wa = QPushButton(tr("pay_whatsapp_btn", lang))
-                    btn_wa.setObjectName("AccentButton")
-                    btn_wa.clicked.connect(lambda: self._open_whatsapp(wa_number))
-                    layout.addWidget(btn_wa)
+            self._payment_area = QVBoxLayout()
+            layout.addLayout(self._payment_area, 1)
             btn_close = QPushButton(tr("btn_close", lang))
             btn_close.clicked.connect(self.accept)
             layout.addWidget(btn_close)
+
+            # Prefer a previously verified cache so the payment window can
+            # display immediately, even before the startup network worker ends.
+            cache_dir = get_app_data_dir(controller.custom_data_dir)
+            cached = load_cached_update(cache_dir)
+            if cached and has_any_valid_signature(cached, controller.license_mgr):
+                controller.license_mgr.apply_update_json(cached)
+
+            payment = controller.license_mgr.get_verified_payment_info()
+            if payment:
+                self._show_payment_info(payment)
+            else:
+                self._show_payment_loading()
+                self._start_payment_refresh(cache_dir)
+
+        def _clear_payment_area(self) -> None:
+            while self._payment_area.count():
+                item = self._payment_area.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+
+        def _show_payment_loading(self) -> None:
+            self._clear_payment_area()
+            text = "جاري تحميل بيانات الدفع والتحقق من توقيعها..." if self.controller.lang == "ar" else "Loading payment details and verifying their signature..."
+            label = QLabel(text)
+            label.setWordWrap(True)
+            self._payment_area.addWidget(label)
+
+        def _show_payment_info(self, payment: Dict[str, str]) -> None:
+            self._clear_payment_area()
+            lang = self.controller.lang
+            form = QFormLayout()
+            for field_key, label_key in (
+                ("price", "pay_price"),
+                ("bank_name", "pay_bank_name"),
+                ("bank_account", "pay_bank_account"),
+                ("instapay", "pay_instapay"),
+                ("wallet", "pay_wallet"),
+            ):
+                val_lbl = QLineEdit(payment.get(field_key, "-"))
+                val_lbl.setReadOnly(True)
+                val_lbl.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+                form.addRow(tr(label_key, lang), val_lbl)
+            self._payment_area.addLayout(form)
+            wa_number = payment.get("whatsapp", "").strip()
+            if wa_number:
+                btn_wa = QPushButton(tr("pay_whatsapp_btn", lang))
+                btn_wa.setObjectName("AccentButton")
+                btn_wa.clicked.connect(lambda: self._open_whatsapp(wa_number))
+                self._payment_area.addWidget(btn_wa)
+
+        def _show_payment_error(self) -> None:
+            self._clear_payment_area()
+            lang = self.controller.lang
+            warning_text = tr("pay_unverified_warning", lang)
+            # Fail closed: unsigned bank details must never be displayed.
+            if not self.controller.license_mgr.keys.get("payment", "").strip():
+                detail = (
+                    "\n\nسبب إضافي: مفتاح التحقق العام لبيانات الدفع غير مضمّن في هذه النسخة. "
+                    "استعد مفتاح المشروع العام الصحيح ثم أعد بناء التطبيق ووقّع Update.json بالمفتاح الخاص المطابق."
+                    if lang == "ar" else
+                    "\n\nAdditional cause: this build has no payment verification public key. "
+                    "Restore the matching project public key, rebuild the app, and sign Update.json with its private pair."
+                )
+                warning_text += detail
+            warn = QLabel(warning_text)
+            warn.setWordWrap(True)
+            self._payment_area.addWidget(warn)
+
+        def _start_payment_refresh(self, cache_dir: Path) -> None:
+            # Attach the temporary worker to the top-level window, not this
+            # modal dialog, so closing the dialog cannot destroy a live QThread.
+            root: QWidget = self
+            while root.parentWidget() is not None:
+                root = root.parentWidget()
+
+            existing = getattr(root, "_payment_update_worker", None)
+            if existing is not None and existing.isRunning():
+                existing.update_fetched.connect(self._on_payment_update_fetched)
+                return
+
+            # Reuse the app's in-flight startup check when it is still running.
+            startup_worker = getattr(root, "_net_worker", None)
+            if startup_worker is not None and startup_worker.isRunning():
+                startup_worker.update_fetched.connect(self._on_payment_update_fetched)
+                return
+
+            url = self.controller.settings.data.get("update_url", DEFAULT_UPDATE_URL)
+            worker = NetworkCheckWorkerThread(url, cache_dir, self.controller.license_mgr)
+            _track_qt_worker(worker)
+            root._payment_update_worker = worker
+            worker.update_fetched.connect(self._on_payment_update_fetched)
+            worker.finished.connect(lambda: setattr(root, "_payment_update_worker", None))
+            worker.start()
+
+        def _on_payment_update_fetched(self, data: Any) -> None:
+            if isinstance(data, dict):
+                self.controller.license_mgr.apply_update_json(data)
+            payment = self.controller.license_mgr.get_verified_payment_info()
+            if payment:
+                self._show_payment_info(payment)
+            else:
+                self._show_payment_error()
 
         def _open_whatsapp(self, phone: str) -> None:
             clean_phone = "".join(ch for ch in phone if ch.isdigit())
@@ -2573,6 +2647,8 @@ if HAS_PYQT6:
                 QMessageBox.warning(self, "HMZ", tr(license_message_key(status), self.controller.lang))
 
         def _on_update_json_received(self, data: Dict[str, Any]) -> None:
+            if not isinstance(data, dict):
+                return
             mgr = self.controller.license_mgr
             was_active = mgr.state.get("activated", False)
             mgr.apply_update_json(data)
