@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from PyQt6.QtCore import QObject, QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap
-from PyQt6.QtWidgets import QInputDialog, QMenu, QWidget
+from PyQt6.QtWidgets import QInputDialog, QMenu, QScrollBar, QWidget
 
 from video_studio_core import ANIM_IN_KEYS, ANIM_LOOP_KEYS, ANIM_OUT_KEYS, VideoStudioProject, close_reader_pool, generate_thumbnail, track_accepts
 from video_studio_i18n import tr, track_display_name
@@ -508,6 +508,16 @@ class MultiTrackTimelineWidget(QWidget):
         self._cache: Optional[QPixmap] = None
         self._cache_sig: Any = None
 
+        # A visible vertical scrollbar makes lower tracks discoverable without
+        # requiring modifier keys. It is kept inside the timeline widget so
+        # the ruler and track headers remain aligned.
+        self.v_scrollbar = QScrollBar(Qt.Orientation.Vertical, self)
+        self.v_scrollbar.setObjectName("TimelineVerticalScrollBar")
+        self.v_scrollbar.setFixedWidth(14)
+        self.v_scrollbar.setRange(0, 0)
+        self.v_scrollbar.valueChanged.connect(self._on_vertical_scrollbar)
+        self.v_scrollbar.hide()
+
     def _on_thumbs_ready(self) -> None:
         self._thumb_version += 1
         self.update()
@@ -560,8 +570,20 @@ class MultiTrackTimelineWidget(QWidget):
         visible = (self.width() - self.HEADER_WIDTH) / self.pixels_per_sec
         self.scroll_x = max(0.0, min(self.scroll_x, max(0.0, total - visible)))
         content_h = len(self.controller.project.tracks) * self.TRACK_HEIGHT
-        view_h = self.height() - self.RULER_HEIGHT
-        self.scroll_y = max(0.0, min(self.scroll_y, max(0.0, content_h - view_h)))
+        view_h = max(1, self.height() - self.RULER_HEIGHT)
+        max_scroll = max(0.0, content_h - view_h)
+        self.scroll_y = max(0.0, min(self.scroll_y, max_scroll))
+        bar = getattr(self, "v_scrollbar", None)
+        if bar is not None:
+            bar.blockSignals(True)
+            bar.setPageStep(view_h)
+            bar.setSingleStep(self.TRACK_HEIGHT)
+            bar.setRange(0, int(max_scroll))
+            bar.setValue(int(round(self.scroll_y)))
+            bar.blockSignals(False)
+            bar.setVisible(max_scroll > 0)
+            bar.setGeometry(max(0, self.width() - bar.width()), self.RULER_HEIGHT,
+                            bar.width(), view_h)
 
     # ---- track header controls -------------------------------------------------
     @staticmethod
@@ -954,10 +976,16 @@ class MultiTrackTimelineWidget(QWidget):
         if mods & Qt.KeyboardModifier.ControlModifier:
             self.set_zoom(self.pixels_per_sec * (1.15 if dy > 0 else 1 / 1.15), anchor_x=event.position().x())
             self.zoom_changed.emit(self.pixels_per_sec)
-        elif mods & Qt.KeyboardModifier.AltModifier or mods & Qt.KeyboardModifier.ShiftModifier:
-            self.scroll_y -= dy / 2.0
+        elif mods & Qt.KeyboardModifier.ShiftModifier:
+            self.scroll_x -= (event.angleDelta().x() or dy) / self.pixels_per_sec * 1.2
         else:
-            self.scroll_x -= dy / self.pixels_per_sec * 1.2
+            # Plain mouse wheel scrolls through tracks; Shift+wheel scrolls time.
+            self.scroll_y -= (dy or event.angleDelta().x()) / 2.0
+        self._clamp_scroll()
+        self.update()
+
+    def _on_vertical_scrollbar(self, value: int) -> None:
+        self.scroll_y = float(value)
         self._clamp_scroll()
         self.update()
 
@@ -975,8 +1003,8 @@ class MultiTrackTimelineWidget(QWidget):
                 return
 
     def resizeEvent(self, event: Any) -> None:
-        self._clamp_scroll()
         super().resizeEvent(event)
+        self._clamp_scroll()
 
     # ---- drag & drop (stickers from the panel, or any media file from the computer) ------------------
     @staticmethod

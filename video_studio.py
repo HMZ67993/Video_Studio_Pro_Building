@@ -845,7 +845,20 @@ if HAS_PYQT6:
             layout = QVBoxLayout(self)
             payment = controller.license_mgr.get_verified_payment_info()
             if not payment:
-                warn = QLabel(tr("pay_unverified_warning", lang))
+                warning_text = tr("pay_unverified_warning", lang)
+                # Fail closed: never display unsigned bank details. Explain the
+                # exact setup problem when the app was built without its public key.
+                if not controller.license_mgr.keys.get("payment", "").strip():
+                    detail = (
+                        "\\n\\nسبب إضافي: مفتاح التحقق العام لبيانات الدفع غير مضمّن في هذه النسخة. "
+                        "أنشئ/استعد مفاتيح المشروع محليًا، ثم أعد بناء التطبيق ووقّع Update.json بالمفتاح نفسه."
+                        if lang == "ar" else
+                        "\\n\\nAdditional cause: this build has no payment verification public key. "
+                        "Restore/generate this project's keys locally, rebuild the app, and sign Update.json "
+                        "with the matching private key."
+                    )
+                    warning_text += detail
+                warn = QLabel(warning_text)
                 warn.setWordWrap(True)
                 layout.addWidget(warn)
             else:

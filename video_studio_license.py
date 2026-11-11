@@ -40,10 +40,10 @@ REVERIFY_DAYS = 7
 OFFLINE_GRACE_DAYS = 14
 PRODUCT_CODE = "VSP"
 # Public keys (Base64 raw Ed25519). `tools/issue_serial.py keygen` writes them here automatically.
-SERIAL_PUBLIC_KEY_B64 = ""
-REVOKE_PUBLIC_KEY_B64 = ""
-PAYMENT_PUBLIC_KEY_B64 = ""
-UPDATE_PUBLIC_KEY_B64 = ""
+SERIAL_PUBLIC_KEY_B64 = "pKCd5CutTNaZBC9MgUd4NM71PKXExHQLHBx4f0kImwI="
+REVOKE_PUBLIC_KEY_B64 = "7ThWiLGkVhbqtS96vIu2Q92HB7kTxbKgOGzOb7e/8cE="
+PAYMENT_PUBLIC_KEY_B64 = "mfLV8rxP+431B9TIc/yunVtbbn3VV+eqC5ioQY/I3ok="
+UPDATE_PUBLIC_KEY_B64 = "8jm7k1fXiwsFZXUgs6TKICyckDNrT4ipYv8KGG8y6BA="
 
 DEFAULT_UPDATE_URL = "https://raw.githubusercontent.com/HMZ67993/Video-Studio-Pro/refs/heads/main/Update.json"
 
