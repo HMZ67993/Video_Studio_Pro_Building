@@ -152,7 +152,7 @@ def to_ts(date_str: str, end_of_day: bool = False) -> int:
     return int(dt.timestamp())
 
 
-def cmd_issue(machine: str, customer: str, cid: str = "", days: int = 0, expires: str = "", nbf: str = "") -> str:
+def cmd_issue(machine: str, customer: str, cid: str = "", days: int = 0, expires: str = "", nbf: str = "", print_serial: bool = True) -> str:
     now = int(time.time())
     payload: Dict[str, Any] = {
         "v": SERIAL_FORMAT_VERSION,
@@ -176,7 +176,8 @@ def cmd_issue(machine: str, customer: str, cid: str = "", days: int = 0, expires
     state = load_state()
     state["issued"].append({"jti": payload["jti"], "customer": payload["name"], "machine": payload["m"], "nbf": payload["nbf"], "exp": payload["e"], "serial": serial})
     save_state(state)
-    print(serial)
+    if print_serial:
+        print(serial)
     return serial
 
 

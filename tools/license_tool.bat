@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 title HMZ Video Studio Pro - License Manager
 cd /d "%~dp0.."

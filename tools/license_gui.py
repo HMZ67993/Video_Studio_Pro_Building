@@ -117,7 +117,7 @@ class LicenseToolGUI(tk.Tk):
             elif mode == "حتى تاريخ":
                 expires = self.days.get().strip()
                 datetime.date.fromisoformat(expires)
-            serial = tool.cmd_issue(machine, self.customer.get().strip() or "Customer", "", days, expires, "")
+            serial = tool.cmd_issue(machine, self.customer.get().strip() or "Customer", "", days, expires, "", print_serial=False)
             self.log("السيريال الصادر:\n" + serial)
             self.clipboard_clear()
             self.clipboard_append(serial)
